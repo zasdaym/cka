@@ -1278,11 +1278,11 @@ curl "$PUBLIC_IP:$NODE_PORT"
 - Used to bypass the cluster-wide IP address, name will be resolved directly to pod IPs.
 
 ```bash
-cat <<EOF >kubeapp-service.yaml
+cat <<EOF >kubeapp-headless-service.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: kubeapp
+  name: kubeapp-headless
 spec:
   type: ClusterIP
   clusterIP: None
@@ -1294,14 +1294,18 @@ spec:
       targetPort: 8000
 EOF
 
-kubectl apply -f kubeapp-service.yaml
-kubectl get svc
+kubectl apply -f kubeapp-headless-service.yaml
+kubectl get svc | grep kubeapp
 kubectl describe svc kubeapp
+kubectl describe svc kubeapp-headless
 
 kubectl run test -it --rm --image=kubenesia/kubebox -- sh
-curl kubeapp
+
 nslookup kubeapp
-exit
+nslookup kubeapp-headless
+
+curl kubeapp
+curl kubeapp-headless:8000
 ```
 
 ### Review
