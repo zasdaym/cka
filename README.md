@@ -173,7 +173,7 @@ kubectl delete pod nginx
 ## Deployment
 
 - Manage a set of Pods to run an application workload, usually stateless application.
-- Stateless = can be moved between nodes easily.
+- Stateless = No state = Not storing anything = Can be moved between nodes easily.
 
 ### Create Deployment
 
