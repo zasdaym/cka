@@ -96,6 +96,11 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 source <(kubectl completion bash)
 ```
 
+### Make kubectl completion permanent
+```bash
+echo "source <(kubectl completion bash)" >> $HOME/.bashrc
+```
+
 ### Check cluster
 
 ```bash
@@ -153,8 +158,17 @@ spec:
 EOF
 
 kubectl apply -f nginx.yaml
+kuebctl get pods
+kubectl get pods -o wide
+kubectl get pods nginx
 kubectl delete pod nginx
 ```
+
+### Review
+
+- Create a Pod with the following specification:
+  - Name: web
+  - Image: httpd:2.4.64
 
 ## Deployment
 
