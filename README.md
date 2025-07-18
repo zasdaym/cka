@@ -130,6 +130,28 @@ kubectl apply -f calico.yaml
 kubectl get pods -n kube-system | grep calico
 ```
 
+# Basic text editing
+
+It's useful to be able to act quick on CKA exam. This means exam taker needs to be fluent in using text editor like vim (recommended) or nano.
+
+## Basic vim
+
+```
+Move around: hjkl
+Insert mode: i
+Exit insert mode: esc
+Copy current line: yy
+Paste: p
+Cut current line: dd
+Undo: u
+Redo: Ctrl + r
+Find: /
+Start vertical selection: Shift + v
+Go to beginning of file: gg
+Go to end of file: Shift + g
+Exit: Shift + zz / esc :wq
+```
+
 # Workload & Scheduling
 
 ## Pod
@@ -178,6 +200,7 @@ kubectl delete pod nginx
 ### Create Deployment
 
 ```bash
+# create manifest from scratch
 cat <<EOF >kubeapp.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -200,6 +223,7 @@ spec:
         image: kubenesia/kubeapp:1.0.0
 EOF
 
+# easy way to generate basic manifest
 kubectl create deployment kubeapp --image=kubenesia/kubeapp:1.0.0 --dry-run=client --output=yaml > kubeapp.yaml
 
 kubectl apply -f kubeapp.yaml
@@ -215,12 +239,15 @@ kubectl port-forward deployment/kubeapp --address 0.0.0.0 8080:8000
 
 ```bash
 kubectl scale deployment kubeapp --replicas=4
+kubectl get deployment
+kubectl get pods
 ```
 
 ### Describe Deployment
 
 ```bash
-kubectl describe deploy kubeapp
+kubectl describe deployment kubeapp
+kubectl get deployment kubeapp -o yaml
 ```
 
 ### Deployment rolling update
@@ -264,6 +291,11 @@ kubectl get pods
 
 kubectl set image deployment kubeapp kubeapp=kubenesia/kubeapp:1.1.0
 kubectl get pods
+
+kubectl explain deployment.spec
+kubectl explain deployment.spec.strategy
+kubectl explain deployment.spec.strategy.type
+kubectl explain deployment.spec.strategy.rollingUpdate
 ```
 
 ### Deployment rollout history
