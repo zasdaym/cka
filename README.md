@@ -1504,51 +1504,42 @@ curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/green
 - Intended to be the next generation of Kubernetes Ingress, Load Balancing, and Service Mesh APIs.
 - Designed to be generic, expressive, and role-oriented.
 
-https://kgateway.dev will be used here as Gateway API implementation. For other implementations, check here https://gateway-api.sigs.k8s.io/implementations/.
+nginx-fabric-gateway will be used here as Gateway API implementation. For other implementations, check here https://gateway-api.sigs.k8s.io/implementations/.
 
 ### Install Gateway CRD
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
 ```
 
 ### Install Gateway controller implementation
 
 ```bash
-helm upgrade -i --create-namespace --namespace kgateway-system --version v2.0.3 kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds
-helm upgrade -i -n kgateway-system kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version v2.0.3
+cat <<EOF >/tmp/nginx-gateway.yaml
+nginx:
+  service:
+    type: NodePort
+    nodePorts:
+      - port: 30080
+        listenerPort: 80
+EOF
+
+helm install nginx-gateway oci://ghcr.io/nginx/charts/nginx-gateway-fabric --version 2.0.2 --create-namespace -n nginx-gateway -f /tmp/nginx-gateway.yaml
 ```
 
 ### Create Gateway
 
 ```bash
 kubectl apply -f- <<EOF
-apiVersion: gateway.kgateway.dev/v1alpha1
-kind: GatewayParameters
-metadata:
-  name: nodeport
-  namespace: kgateway-system
-spec:
-  kube: 
-    service:
-      type: NodePort
-EOF
-
-kubectl apply -f- <<EOF
 kind: Gateway
 apiVersion: gateway.networking.k8s.io/v1
 metadata:
-  name: http
-  namespace: kgateway-system
+  name: nginx-gateway
+  namespace: nginx-gateway
 spec:
-  gatewayClassName: kgateway
-  infrastructure:
-    parametersRef:
-      name: nodeport
-      group: gateway.kgateway.dev
-      kind: GatewayParameters
+  gatewayClassName: nginx
   listeners:
   - protocol: HTTP
-    port: 8080
+    port: 80
     name: http
     allowedRoutes:
       namespaces:
@@ -1570,9 +1561,8 @@ spec:
   hostnames:
   - blue.$PUBLIC_IP.sslip.io
   parentRefs:
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    name: contour
+  - name: nginx-gateway
+    namespace: nginx-gateway
   rules:
   - matches:
     - path:
@@ -1595,9 +1585,8 @@ spec:
   hostnames:
   - green.$PUBLIC_IP.sslip.io
   parentRefs:
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    name: contour
+  - name: nginx-gateway
+    namespace: nginx-gateway
   rules:
   - matches:
     - path:
@@ -1625,9 +1614,8 @@ metadata:
     app: blue
 spec:
   parentRefs:
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    name: contour
+  - name: nginx-gateway
+    namespace: nginx-gateway
   rules:
   - matches:
     - path:
@@ -1648,9 +1636,8 @@ metadata:
     app: green
 spec:
   parentRefs:
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    name: contour
+  - name: nginx-gateway
+    namespace: nginx-gateway
   rules:
   - matches:
     - path:
@@ -1676,9 +1663,8 @@ metadata:
   name: weight
 spec:
   parentRefs:
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    name: contour
+  - name: nginx-gateway
+    namespace: nginx-gateway
   rules:
   - matches:
     - path:
