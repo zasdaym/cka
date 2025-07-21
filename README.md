@@ -553,7 +553,7 @@ spec:
     spec:
       containers:
       - name: mysql
-        image: mysql:8.4.2
+        image: public.ecr.aws/docker/library/mysql:8.4.2
         ports:
         - containerPort: 3306
           name: mysql
