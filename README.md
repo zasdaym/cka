@@ -649,7 +649,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: kubenesia/kubeapp:1.2.0
+      - image: public.ecr.aws/docker/library/nginx:1.27.2
         name: kubeapp
         envFrom:
           - configMapRef:
@@ -683,7 +683,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: kubenesia/kubeapp:1.2.0
+      - image: public.ecr.aws/docker/library/nginx:1.27.2
         name: kubeapp
         volumeMounts:
           - mountPath: /data/config
@@ -732,7 +732,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: kubenesia/kubeapp:1.2.0
+      - image: public.ecr.aws/docker/library/nginx:1.27.2
         name: kubeapp
         envFrom:
           - secretRef:
@@ -765,7 +765,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: kubenesia/kubeapp:1.2.0
+      - image: public.ecr.aws/docker/library/nginx:1.27.2
         name: kubeapp
         volumeMounts:
           - mountPath: /data/config
