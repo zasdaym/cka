@@ -1135,6 +1135,51 @@ kubectl describe node worker2
 kubectl delete pod kubeapp-requests-limits
 ```
 
+## Create ResourceQuota
+
+Control resources per namespace instead of per pod.
+
+```bash
+kubectl create ns payment
+
+cat <<EOF >resourcequota-payment.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: payment
+  namespace: payment
+spec:
+  hard:
+    requests.cpu: "2"
+EOF
+kubectl apply -f resourcequota-payment.yaml
+
+cat <<EOF >nginx-payment.yaml
+apiVersion: v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: payment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27.2
+          resources:
+            requests:
+              cpu: 1000m
+EOF
+kubectl apply -f nginx-payment.yaml
+```
+
 # Autoscaling
 
 - Change replica number of a Deployment based on resource usage
