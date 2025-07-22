@@ -1358,6 +1358,7 @@ spec:
     - port: 80
       protocol: TCP
       targetPort: 8000
+      nodePort: 31080
 EOF
 
 kubectl apply -f kubeapp-service.yaml
