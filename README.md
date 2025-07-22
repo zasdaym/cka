@@ -1197,7 +1197,7 @@ vim metrics-server.yaml
 kubectl apply -f metrics-server.yaml
 kubectl -n kube-system get pods
 kubectl top nodes
-kubectl top pods
+kubectl top pods -A
 kubectl describe nodes k8s-worker1-trainer
 ```
 
