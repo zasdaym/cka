@@ -1322,23 +1322,23 @@ exit
 ### ExternalName
 
 ```bash
-cat <<EOF >get-ip-service.yaml
+cat <<EOF >gogolele-service.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: get-ip
+  name: gogolele
 spec:
   type: ExternalName
   externalName: google.com
 EOF
 
-kubectl apply -f get-ip-service.yaml
+kubectl apply -f gogolele.yaml
 kubectl get svc
 kubectl describe svc get-ip
 
 kubectl run test -it --rm --image=kubenesia/kubebox -- sh
-curl get-ip
-nslookup get-ip
+curl gogolele
+nslookup gogolele
 exit
 ```
 
