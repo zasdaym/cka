@@ -1154,8 +1154,10 @@ spec:
 EOF
 kubectl apply -f resourcequota-payment.yaml
 
+kubectl get resourcequota -n payment
+
 cat <<EOF >nginx-payment.yaml
-apiVersion: v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx
@@ -1178,6 +1180,8 @@ spec:
               cpu: 1000m
 EOF
 kubectl apply -f nginx-payment.yaml
+
+kubectl get pods -n payment
 ```
 
 # Autoscaling
