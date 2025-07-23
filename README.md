@@ -1685,7 +1685,7 @@ metadata:
     app: blue
 spec:
   hostnames:
-  - blue.$WORKER_IP.sslip.io
+  - blue.example.com
   parentRefs:
   - name: nginx-gateway
     namespace: nginx-gateway
@@ -1709,7 +1709,7 @@ metadata:
     app: green
 spec:
   hostnames:
-  - green.$WORKER_IP.sslip.io
+  - green.example.com
   parentRefs:
   - name: nginx-gateway
     namespace: nginx-gateway
@@ -1724,8 +1724,8 @@ spec:
       port: 80
 EOF
 
-curl http://$WORKER_IP.sslip.io:30080/blue
-curl http://$WORKER_IP.sslip.io:30080/green
+curl --connect-to ::$WORKER_IP:30080 blue.example.com
+curl --connect-to ::$WORKER_IP:30080 green.example.com
 ```
 
 ### Route by path
@@ -1775,8 +1775,8 @@ spec:
       port: 80
 EOF
 
-curl $WORKER_IP:30080/blue
-curl $WORKER_IP:30080/green
+curl --connect-to ::$WORKER_IP:30080 example.com/blue
+curl --connect-to ::$WORKER_IP:30080 example.com/green
 ```
 
 ### Weight
@@ -1807,17 +1807,17 @@ spec:
       weight: 50
 EOF
 
-curl $WORKER_IP:30080/weight
-curl $WORKER_IP:30080/weight
-curl $WORKER_IP:30080/weight
-curl $WORKER_IP:30080/weight
+curl --connect-to ::$WORKER_IP:30080 example.com/weight
+curl --connect-to ::$WORKER_IP:30080 example.com/weight
+curl --connect-to ::$WORKER_IP:30080 example.com/weight
+curl --connect-to ::$WORKER_IP:30080 example.com/weight
 ```
 
 ### Review
 
 - Create two deployments `blue` and `green` with image `mendhak/http-https-echo:31`.
-- The deployment should be accessible on `color.$CONTROLLER_IP.sslip.io:30180` with 80:20 balancing between blue and green. Use HTTPRoute to achieve this.
-- Run `curl -s color.$CONTROLLER_IP.sslip.io:30180/` multiple times to check the result.
+- The deployment should be accessible on `loadbalance.com` with 80:20 balancing between blue and green. Use HTTPRoute to achieve this.
+- Run `curl --connect-to ::$WORKER_IP:30180 loadbalance.com` multiple times to check the result.
 
 ## Network Policy
 
