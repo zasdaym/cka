@@ -1247,7 +1247,7 @@ kubectl port-forward deployment/kubeapp --address 0.0.0.0 8080:8000
 
 watch kubectl get hpa
 
-ab -n 100000 -c 1000 http://$PUBLIC_IP:8080/
+ab -n 100000 -c 1000 http://$WORKER_IP:8080/
 ```
 
 # Services & Networking
@@ -1365,9 +1365,9 @@ kubectl apply -f kubeapp-service.yaml
 kubectl get svc
 kubectl describe svc kubeapp
 
-export PUBLIC_IP=$(curl -s icanhazip.com)
+export WORKER_IP=CHANGE_ME
 export NODE_PORT=$(kubectl get svc kubeapp -o yaml | yq '.spec.ports[0].nodePort')
-curl "$PUBLIC_IP:$NODE_PORT"
+curl "$WORKER_IP:$NODE_PORT"
 ```
 
 ### Headless Service
@@ -1460,8 +1460,8 @@ kubectl expose deployment green --port=80 --target-port=8080
 ### Route by host header
 
 ```bash
-kubectl create ingress blue --class=nginx --rule="blue.$PUBLIC_IP.sslip.io/*=blue:80"
-kubectl create ingress green --class=nginx --rule="green.$PUBLIC_IP.sslip.io/*=green:80"
+kubectl create ingress blue --class=nginx --rule="blue.$WORKER_IP.sslip.io/*=blue:80"
+kubectl create ingress green --class=nginx --rule="green.$WORKER_IP.sslip.io/*=green:80"
 
 kubectl get ingress
 kubectl get ingress blue -o yaml
@@ -1470,8 +1470,8 @@ kubectl get ingress green -o yaml
 export NODE_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o yaml | yq '.spec.ports[0].nodePort')
 echo $NODE_PORT
 
-curl http://blue.$PUBLIC_IP.sslip.io:$NODE_PORT
-curl http://green.$PUBLIC_IP.sslip.io:$NODE_PORT
+curl http://blue.$WORKER_IP.sslip.io:$NODE_PORT
+curl http://green.$WORKER_IP.sslip.io:$NODE_PORT
 ```
 
 ### Route by path
@@ -1530,8 +1530,8 @@ EOF
 
 kubectl apply -f green-ingress.yaml
 
-curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/blue
-curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/green
+curl http://$WORKER_IP.sslip.io:$NODE_PORT/blue
+curl http://$WORKER_IP.sslip.io:$NODE_PORT/green
 ````
 
 ### Review
@@ -1541,14 +1541,14 @@ curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/green
   - Minimum CPU is 0.5 core.
   - Minimum memory is 128 MiB.
   - Scale based on CPU utilization with maximum replicas of 10.
-  - Make it accessible on `kubeapp1.$PUBLIC_IP.sslip.io`.
+  - Make it accessible on `kubeapp1.$WORKER_IP.sslip.io`.
 
 - Create Deployment `kubeapp2`.
   - Use image: `kubenesia/kubeapp:1.2.0`.
   - Minimum CPU is 1/4 core.
   - Minimum memory is 64 MiB.
   - Scale based on CPU utilization with maximum replicas of 2.
-  - Make it accessible on `kubeapp2.$PUBLIC_IP.sslip.io`.
+  - Make it accessible on `kubeapp2.$WORKER_IP.sslip.io`.
 
 - Run these commands. Does it work? If not, what's wrong?
 
@@ -1685,7 +1685,7 @@ metadata:
     app: blue
 spec:
   hostnames:
-  - blue.$PUBLIC_IP.sslip.io
+  - blue.$WORKER_IP.sslip.io
   parentRefs:
   - name: nginx-gateway
     namespace: nginx-gateway
@@ -1709,7 +1709,7 @@ metadata:
     app: green
 spec:
   hostnames:
-  - green.$PUBLIC_IP.sslip.io
+  - green.$WORKER_IP.sslip.io
   parentRefs:
   - name: nginx-gateway
     namespace: nginx-gateway
@@ -1724,8 +1724,8 @@ spec:
       port: 80
 EOF
 
-curl http://$PUBLIC_IP.sslip.io:30080/blue
-curl http://$PUBLIC_IP.sslip.io:30080/green
+curl http://$WORKER_IP.sslip.io:30080/blue
+curl http://$WORKER_IP.sslip.io:30080/green
 ```
 
 ### Route by path
@@ -1775,8 +1775,8 @@ spec:
       port: 80
 EOF
 
-curl $PUBLIC_IP:30080/blue
-curl $PUBLIC_IP:30080/green
+curl $WORKER_IP:30080/blue
+curl $WORKER_IP:30080/green
 ```
 
 ### Weight
