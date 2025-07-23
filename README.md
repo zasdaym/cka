@@ -1822,6 +1822,10 @@ curl --connect-to ::$WORKER_IP:30080 example.com/weight
 
 ## Network Policy
 
+Limit network connection between pods.
+
+### Deny from other namespace
+
 ```bash
 # Create target workload
 kubectl create deployment kubeapp --image=kubenesia/kubeapp:1.2.0 --port=8000
@@ -1856,12 +1860,62 @@ wget -qO- --timeout=2 kubeapp # ok
 kubectl delete netpol deny-from-other-namespaces
 ```
 
+### Allow only from pod with specific labels
+```bash
+kubectl create ns marketplace
+
+kubectl create deployment backend --namespace=marketplace --image=nginx:1.27.2
+kubectl create deployment frontend --namespace=marketplace --image=nginx:1.27.2
+kubectl create deployment experiment --namespace=marketplace --image=nginx:1.27.2
+
+kubectl expose deployment backend --port=80
+kubectl expose deployment frontend --port=80
+kubectl expose deployment experiment --port=80
+
+cat <<EOF >marketplace-netpol.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-from-frontend
+  namespace: marketplace
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontendn
+EOF
+kubectl apply -f marketplace-netpol.yaml
+
+kubectl exec -n marketplace -ti deployment/frontend -- bash
+curl -m 5 -s backend.marketplace # ok
+
+kubectl exec -n marketplace -ti deployment/experiment -- bash
+curl -m 5 -s backend.marketplace # fail
+```
+
+### Allow only from specific namespace
+```bash
+```
+
 ## Review
 
-- Create new namespace named `marketplace`.
-- Create 3 deployments inside the namespace `marketplace`: `backend`, `frontend` and `experiment` using image `nginx:1.27.2`.
-- Create a NetworkPolicy that only allows traffic to pods with labels app=backend if the source pod has label app=frontend inside the `marketplace` namespace.
-- Test by accessing the backend pod IP from the frontend and experiment pods.
+- Create new namespaces `ride` and `food`.
+- Inside namespace `ride`, create 3 deployments:
+  - `gateway`
+  - `travel`
+  - `shadow`
+- Inside namespace `food`, create 2 deployments:
+  - `order`
+  - `tenant`
+  - `promo`
+- Create NetworkPolicy `allow-from-ride` on namespace `food` to allow access from namespace `ride`.
+- Create NetworkPolicy `allow-travel-from-gateway` on namespace `ride` to only allow pod with label `app=travel` to access pod with label `app=gateway` inside the same namespace.
+- All deployments should use image `nginx:1.27.2`.
+- All deployments should have a Service with type `ClusterIP`.
 
 # Storage
 
