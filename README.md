@@ -1670,6 +1670,12 @@ EOF
 ### Route by host header
 
 ```bash
+kubectl create deployment blue --image=mendhak/http-https-echo:31
+kubectl create deployment green --image=mendhak/http-https-echo:31
+
+kubectl expose deployment blue --port=80 --target-port=8080
+kubectl expose deployment green --port=80 --target-port=8080
+
 kubectl apply -f - <<EOF
 kind: HTTPRoute
 apiVersion: gateway.networking.k8s.io/v1
@@ -1801,10 +1807,10 @@ spec:
       weight: 50
 EOF
 
-curl $PUBLIC_IP:$30080/weight
-curl $PUBLIC_IP:$30080/weight
-curl $PUBLIC_IP:$30080/weight
-curl $PUBLIC_IP:$30080/weight
+curl $WORKER_IP:$30080/weight
+curl $WORKER_IP:$30080/weight
+curl $WORKER_IP:$30080/weight
+curl $WORKER_IP:$30080/weight
 ```
 
 ### Review
