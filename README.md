@@ -1800,6 +1800,12 @@ curl -I $PUBLIC_IP:$NODE_PORT/weight
 curl -I $PUBLIC_IP:$NODE_PORT/weight
 ```
 
+### Review
+
+- Create two deployments `blue` and `green` with image `mendhak/http-https-echo:31`.
+- The deployment should be accessible on `color.$CONTROLLER_IP.sslip.io:30180` with 80:20 balancing between blue and green. Use HTTPRoute to achieve this.
+- Run `curl -s color.$CONTROLLER_IP.sslip.io:30180/` multiple times to check the result.
+
 ## Network Policy
 
 ```bash
