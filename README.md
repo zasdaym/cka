@@ -1542,72 +1542,76 @@ curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/green
   - Minimum memory is 128 MiB.
   - Scale based on CPU utilization with maximum replicas of 10.
   - Make it accessible on `kubeapp1.$PUBLIC_IP.sslip.io`.
+
 - Create Deployment `kubeapp2`.
   - Use image: `kubenesia/kubeapp:1.2.0`.
   - Minimum CPU is 1/4 core.
   - Minimum memory is 64 MiB.
   - Scale based on CPU utilization with maximum replicas of 2.
   - Make it accessible on `kubeapp2.$PUBLIC_IP.sslip.io`.
+
 - Run these commands, and try to access http://echo.$WORKER1_IP.sslip.io:31090. Does it work? If not, what's wrong?
-  ```bash
-  cat <<EOF >echo.yaml
-  ---
-  apiVersion: apps/v1
-  kind: Deployment
-  metadata:
-    name: echo
-    labels:
+
+```bash
+export WORKER1_IP=CHANGE_ME
+cat <<EOF >echo.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  labels:
+    app: echo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
       app: echo
-  spec:
-    replicas: 2
-    selector:
-      matchLabels:
+  template:
+    metadata:
+      labels:
         app: echo
-    template:
-      metadata:
-        labels:
-          app: echo
-      spec:
-        containers:
-        - name: echo
-          image: mendhak/http-https-echo:31
-          ports:
-          - containerPort: 8080
-  ---
-  apiVersion: v1
-  kind: Service
-  metadata:
-    name: echo
-  spec:
-    type: NodePort
-    selector:
-      app: echo
-    ports:
-    - port: 80
-      protocol: TCP
-      targetPort: 8080
-      nodePort: 31090
-  ---
-  apiVersion: networking.k8s.io/v1
-  kind: Ingress
-  metadata:
-    name: echo
-  spec:
-    ingressClassName: nginx
-    rules:
-    - host: echo.$WORKER1_IP.sslip.io
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: echo
-                port:
-                  number: 8080
-  EOF
-  kubectl apply -f echo.yaml
-  ```
+    spec:
+      containers:
+      - name: echo
+        image: mendhak/http-https-echo:31
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+spec:
+  type: NodePort
+  selector:
+    app: echo
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 8080
+    nodePort: 31090
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echo
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: echo.$WORKER1_IP.sslip.io
+    http:
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: echo
+              port:
+                number: 8080
+EOF
+kubectl apply -f echo.yaml
+```
 
 ## Gateway
 
