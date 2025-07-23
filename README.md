@@ -1636,6 +1636,7 @@ curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 ```bash
 cat <<EOF >/tmp/nginx-gateway.yaml
 nginx:
+  kind: daemonSet
   service:
     type: NodePort
     nodePorts:
