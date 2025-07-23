@@ -1587,7 +1587,8 @@ spec:
   selector:
     app: echo
   ports:
-  - port: 80
+  - port: 8080
+    targetPort: 80
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
