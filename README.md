@@ -1807,10 +1807,10 @@ spec:
       weight: 50
 EOF
 
-curl $WORKER_IP:$30080/weight
-curl $WORKER_IP:$30080/weight
-curl $WORKER_IP:$30080/weight
-curl $WORKER_IP:$30080/weight
+curl $WORKER_IP:30080/weight
+curl $WORKER_IP:30080/weight
+curl $WORKER_IP:30080/weight
+curl $WORKER_IP:30080/weight
 ```
 
 ### Review
