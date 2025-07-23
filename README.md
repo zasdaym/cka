@@ -1859,7 +1859,9 @@ kubectl delete netpol deny-from-other-namespaces
 ## Review
 
 - Create new namespace named `marketplace`.
+- Create 3 deployments inside the namespace `marketplace`: `backend`, `frontend` and `experiment` using image `nginx:1.27.2`.
 - Create a NetworkPolicy that only allows traffic to pods with labels app=backend if the source pod has label app=frontend inside the `marketplace` namespace.
+- Test by accessing the backend pod IP from the frontend and experiment pods.
 
 # Storage
 
