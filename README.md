@@ -1610,7 +1610,7 @@ spec:
                 number: 8080
 EOF
 kubectl apply -f echo.yaml
-export NGINX_PORT=$(kubectl get svc echo -o yaml | yq '.spec.ports[0].n ingress-nginx ingress-nginx-controller -o yaml | yq '.spec.ports[0].nodePort')
+export NGINX_PORT=$(kubectl get svc echo -o yaml | yq '.spec.ports[0].nodePort')
 curl "http://echo.$WORKER1_IP.sslip.io:$NGINX_PORT"
 ```
 
