@@ -1817,7 +1817,7 @@ curl --connect-to ::$WORKER_IP:30080 example.com/weight
 ### Review
 
 - Create two deployments `blue` and `green` with image `mendhak/http-https-echo:31`.
-- The deployment should be accessible on `loadbalance.com` with 80:20 balancing between blue and green. Use HTTPRoute to achieve this.
+- The deployment should be accessible on `loadbalance.com` with 80:20 balancing between blue and green. Use HTTPRoute with name `loadbalance` to achieve this.
 - Run `curl -s --connect-to ::$WORKER_IP:30180 loadbalance.com | grep hostname` multiple times to check the result.
 
 ## Network Policy
