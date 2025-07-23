@@ -1856,6 +1856,11 @@ wget -qO- --timeout=2 kubeapp # ok
 kubectl delete netpol deny-from-other-namespaces
 ```
 
+## Review
+
+- Create new namespace named `marketplace`.
+- Create a NetworkPolicy that only allows traffic to pods with labels app=backend if the source pod has label app=frontend inside the `marketplace` namespace.
+
 # Storage
 
 ## Share directory between containers inside a pod using emptyDir
