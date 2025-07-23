@@ -1550,7 +1550,7 @@ curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/green
   - Scale based on CPU utilization with maximum replicas of 2.
   - Make it accessible on `kubeapp2.$PUBLIC_IP.sslip.io`.
 
-- Run these commands, and try to access http://echo.$WORKER1_IP.sslip.io:31090. Does it work? If not, what's wrong?
+- Run these commands. Does it work? If not, what's wrong?
 
 ```bash
 export WORKER1_IP=CHANGE_ME
@@ -1583,14 +1583,13 @@ kind: Service
 metadata:
   name: echo
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: echo
   ports:
   - port: 80
     protocol: TCP
     targetPort: 8080
-    nodePort: 31090
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -1611,6 +1610,8 @@ spec:
                 number: 8080
 EOF
 kubectl apply -f echo.yaml
+export NGINX_PORT=$(kubectl get svc echo -o yaml | yq '.spec.ports[0].n ingress-nginx ingress-nginx-controller -o yaml | yq '.spec.ports[0].nodePort')
+curl "http://echo.$WORKER1_IP.sslip.io:$NGINX_PORT"
 ```
 
 ## Gateway
