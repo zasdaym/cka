@@ -1588,15 +1588,13 @@ spec:
     app: echo
   ports:
   - port: 80
-    protocol: TCP
-    targetPort: 8080
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: echo
 spec:
-  ingressClassName: nginx
+  ingressClassName: ingress-nginx
   rules:
   - host: echo.$WORKER1_IP.sslip.io
     http:
@@ -1610,7 +1608,7 @@ spec:
                 number: 8080
 EOF
 kubectl apply -f echo.yaml
-export NGINX_PORT=$(kubectl get svc echo -o yaml | yq '.spec.ports[0].nodePort')
+export NGINX_PORT=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o yaml | yq '.spec.ports[0].nodePort')
 curl "http://echo.$WORKER1_IP.sslip.io:$NGINX_PORT"
 ```
 
