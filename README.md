@@ -1626,6 +1626,11 @@ nginx-fabric-gateway will be used here as Gateway API implementation. For other 
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
 ```
 
+### Install helm
+```bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
 ### Install Gateway controller implementation
 
 ```bash
