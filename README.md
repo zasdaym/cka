@@ -1718,8 +1718,8 @@ spec:
       port: 80
 EOF
 
-curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/blue
-curl http://$PUBLIC_IP.sslip.io:$NODE_PORT/green
+curl http://$PUBLIC_IP.sslip.io:30080/blue
+curl http://$PUBLIC_IP.sslip.io:30080/green
 ```
 
 ### Route by path
@@ -1769,8 +1769,8 @@ spec:
       port: 80
 EOF
 
-curl $PUBLIC_IP.sslip.io/blue
-curl $PUBLIC_IP.sslip.io/green
+curl $PUBLIC_IP:30080/blue
+curl $PUBLIC_IP:30080/green
 ```
 
 ### Weight
@@ -1801,8 +1801,10 @@ spec:
       weight: 50
 EOF
 
-curl -I $PUBLIC_IP:$NODE_PORT/weight
-curl -I $PUBLIC_IP:$NODE_PORT/weight
+curl $PUBLIC_IP:$30080/weight
+curl $PUBLIC_IP:$30080/weight
+curl $PUBLIC_IP:$30080/weight
+curl $PUBLIC_IP:$30080/weight
 ```
 
 ### Review
