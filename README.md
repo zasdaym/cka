@@ -2252,6 +2252,12 @@ kubectl delete rolebinding andy
 kubectl delete role andy
 ```
 
+## Review
+
+- Create a ClusterRole and ClusterRoleBinding with name `scofield` to allow user `scofield` to:
+  - get, list, create, and delete ingress.
+  - get and list all pods.
+
 # Troubleshooting
 
 ## Debugging Pod
