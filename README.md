@@ -1416,8 +1416,6 @@ kind: Service
 metadata:
   name: nginx
 spec:
-  type: ClusterIP
-  clusterIP: None
   selector:
     application: nginx
     role: web
