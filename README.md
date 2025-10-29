@@ -2001,9 +2001,9 @@ kubectl create deployment backend --namespace=marketplace --image=nginx:1.27.2
 kubectl create deployment frontend --namespace=marketplace --image=nginx:1.27.2
 kubectl create deployment experiment --namespace=marketplace --image=nginx:1.27.2
 
-kubectl expose deployment backend --port=80
-kubectl expose deployment frontend --port=80
-kubectl expose deployment experiment --port=80
+kubectl expose deployment backend --namespace=marketplace --port=80
+kubectl expose deployment frontend --namespace=marketplace --port=80
+kubectl expose deployment experiment --namespace=marketplace --port=80
 
 cat <<EOF >marketplace-netpol.yaml
 apiVersion: networking.k8s.io/v1
@@ -2024,10 +2024,10 @@ EOF
 kubectl apply -f marketplace-netpol.yaml
 
 kubectl exec -n marketplace -ti deployment/frontend -- bash
-curl -m 5 -s backend.marketplace # ok
+curl -m 5 backend.marketplace # ok
 
 kubectl exec -n marketplace -ti deployment/experiment -- bash
-curl -m 5 -s backend.marketplace # fail
+curl -m 5 backend.marketplace # fail
 
 kubectl delete -f marketplace-netpol.yaml
 ```
@@ -2051,11 +2051,16 @@ spec:
         matchLabels:
           department: research
 EOF
-kubectl apply -f marketplace-netpol.yaml
+kubectl apply -f allow-from-specific-namespace-netpol.yaml
 
 kubectl create namespace foobar
 kubectl label namespace foobar department=research
-kubectl run test -it -n research --rm --image=kubenesia/kubebox -- sh
+
+kubectl run test -it -n foobar --rm --image=kubenesia/kubebox -- sh
+curl -m 5 backend.marketplace # ok
+
+kubectl run test -it -n default --rm --image=kubenesia/kubebox -- sh
+curl -m 5 backend.marketplace # fail
 ```
 
 ## Review
