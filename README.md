@@ -2019,7 +2019,7 @@ spec:
   - from:
     - podSelector:
         matchLabels:
-          app: frontendn
+          app: frontend
 EOF
 kubectl apply -f marketplace-netpol.yaml
 
@@ -2035,11 +2035,11 @@ kubectl delete -f marketplace-netpol.yaml
 ### Allow only from specific namespace
 
 ```bash
-cat <<EOF >marketplace-netpol.yaml
+cat <<EOF >allow-from-specific-namespace-netpol.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-backend-from-frontend
+  name: allow-backend-from-research
   namespace: marketplace
 spec:
   podSelector:
@@ -2049,9 +2049,13 @@ spec:
   - from:
     - namespaceSelector:
         matchLabels:
-          app: frontend
+          department: research
 EOF
 kubectl apply -f marketplace-netpol.yaml
+
+kubectl create namespace foobar
+kubectl label namespace foobar department=research
+kubectl run test -it -n research --rm --image=kubenesia/kubebox -- sh
 ```
 
 ## Review
