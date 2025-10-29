@@ -2070,7 +2070,7 @@ curl -m 5 backend.marketplace # fail
   - `gateway`
   - `travel`
   - `shadow`
-- Inside namespace `food`, create 2 deployments:
+- Inside namespace `food`, create 3 deployments:
   - `order`
   - `tenant`
   - `promo`
