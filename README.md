@@ -1264,6 +1264,39 @@ kubectl apply -f nginx-payment.yaml
 kubectl get pods -n payment
 ```
 
+## Priority Class
+
+```bash
+cat <<EOF >high-priority-priorityclass.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 1000000
+globalDefault: false
+description: "This priority class should be used for XYZ service pods only."
+EOF
+kubectl apply -f high-priority-priorityclass.yaml
+
+cat <<EOF >nginx-priorityclass.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    env: test
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+    imagePullPolicy: IfNotPresent
+  priorityClassName: high-priority
+EOF
+kubectl apply -f nginx-priorityclass.yaml
+
+kubectl get priorityclass
+```
+
 # Autoscaling
 
 - Change replica number of a Deployment based on resource usage
