@@ -2075,7 +2075,7 @@ curl -m 5 backend.marketplace # fail
   - `tenant`
   - `promo`
 - Create NetworkPolicy `allow-from-ride` on namespace `food` to allow access from namespace `ride`.
-- Create NetworkPolicy `allow-travel-from-gateway` on namespace `ride` to only allow pod with label `app=travel` to access pod with label `app=gateway` inside the same namespace.
+- Create NetworkPolicy `allow-gateway-from-travel` on namespace `ride` to only allow pod with label `app=travel` to access pod with label `app=gateway` inside the same namespace.
 - All deployments should use image `nginx:1.27.2`.
 - All deployments should have a Service with type `ClusterIP`.
 
