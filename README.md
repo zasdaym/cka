@@ -1321,6 +1321,17 @@ kubectl delete pods --all
 kubectl delete deployment --all
 
 cat <<EOF >kubeapp.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubeapp
+spec:
+  type: NodePort
+  ports:
+    - port: 8000
+      nodePort: 30088
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1347,8 +1358,7 @@ spec:
 EOF
 
 kubectl apply -f kubeapp.yaml
-kubectl expose deployment kubeapp --port 8000
-kubectl autoscale deployment kubeapp --min=2 --max=10 --cpu-percent=50 --dry-run=client --output=yaml > kubeapp-hpa.yaml
+kubectl autoscale deployment kubeapp --min=2 --max=10 --cpu="50%" --dry-run=client --output=yaml > kubeapp-hpa.yaml
 kubectl apply -f kubeapp-hpa.yaml
 kubectl get hpa
 ```
