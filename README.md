@@ -1328,6 +1328,8 @@ metadata:
   name: kubeapp
 spec:
   type: NodePort
+  selector:
+    app: kubeapp
   ports:
     - port: 8000
       nodePort: 30088
