@@ -1370,7 +1370,7 @@ kubectl get hpa
 ```bash
 sudo apt install apache2-utils -y
 watch kubectl get hpa
-ab -n 100000 -c 1000 http://localhost:30088/
+ab -n 100000 -c 100 http://localhost:30088/
 ```
 
 # Services & Networking
