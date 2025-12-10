@@ -1367,11 +1367,8 @@ kubectl get hpa
 
 ```bash
 sudo apt install apache2-utils -y
-kubectl port-forward service/kubeapp --address 0.0.0.0 8000:8000
-
 watch kubectl get hpa
-
-ab -n 100000 -c 1000 http://localhost:8000/
+ab -n 100000 -c 1000 http://localhost:30088/
 ```
 
 # Services & Networking
