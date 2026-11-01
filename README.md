@@ -177,7 +177,7 @@ export do="--dry-run=client -o yaml"
 export now="--force --grace-period=0"
 
 # usage
-k run nginx --image=nginx:1.27.2 $do > nginx.yaml
+k run nginx --image=nginx:1.30.6 $do > nginx.yaml
 k delete pod nginx $now
 ```
 
@@ -211,7 +211,7 @@ kubectl get pods --sort-by=.metadata.creationTimestamp
 
 ```bash
 # Imperative
-kubectl run nginx --image=nginx:1.27.2
+kubectl run nginx --image=nginx:1.30.6
 kubectl delete pods nginx
 
 # Declarative
@@ -223,7 +223,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:1.27.2
+    image: nginx:1.30.6
 EOF
 
 kubectl apply -f nginx.yaml
@@ -237,7 +237,7 @@ kubectl delete pod nginx
 
 - Create a Pod with the following specification:
   - Name: web
-  - Image: httpd:2.4.64
+  - Image: httpd:2.4.69
 
 ## Deployment
 
@@ -540,7 +540,7 @@ livenessProbe:
 - Try to create a Deployment with image `dlneintr/kuard:0.2.0` with 5 replicas and access port 8080 of the container.
 - Try to create a Deployment with the following spec:
   - Name: `web`
-  - Two images: `nginx:1.27.2` and `dlneintr/kuard:0.2.0`
+  - Two images: `nginx:1.30.6` and `dlneintr/kuard:0.2.0`
   - Replica: 10
   - Startup probe to nginx
   - Liveness probe to kuard
@@ -606,8 +606,8 @@ kubectl delete -f fluentd-elasticsearch-daemonset.yaml
 
 ### Review
 
-- Create a DaemonSet with image `nginx:1.27.2`, make sure it isn't scheduled on controller node.
-- Create a DaemonSet with image `httpd:2.4.62`, make sure it is scheduled on all nodes including the controller.
+- Create a DaemonSet with image `nginx:1.30.6`, make sure it isn't scheduled on controller node.
+- Create a DaemonSet with image `httpd:2.4.69`, make sure it is scheduled on all nodes including the controller.
 
 ## StatefulSet
 
@@ -664,7 +664,7 @@ spec:
     spec:
       containers:
       - name: mysql
-        image: public.ecr.aws/docker/library/mysql:8.4.2
+        image: public.ecr.aws/docker/library/mysql:8.4.11
         ports:
         - containerPort: 3306
           name: mysql
@@ -710,7 +710,7 @@ exit
 ### Modify database version
 
 ```bash
-sed -i 's/8.4.2/8.4.3/g' mysql-statefulset.yaml
+sed -i 's/8.4.11/8.4.13/g' mysql-statefulset.yaml
 kubectl apply -f mysql-statefulset.yaml
 kubectl exec -ti mysql-0 -- bash
 mysql -h 127.0.0.1 -u root -p mydb
@@ -728,7 +728,7 @@ show tables;
 Run Pods until a number of them complete successfully. Used for one-time tasks.
 
 ```bash
-kubectl create job pi --image=perl:5.40 $do -- perl -Mbignum=bpi -wle 'print bpi(100)' > pi-job.yaml
+kubectl create job pi --image=perl:5.44 $do -- perl -Mbignum=bpi -wle 'print bpi(100)' > pi-job.yaml
 vim pi-job.yaml
 # set spec.completions: 3, spec.parallelism: 2, spec.backoffLimit: 2
 
@@ -743,7 +743,7 @@ kubectl logs job/pi
 Create a Job on a schedule. The schedule uses cron format: minute, hour, day of month, month, day of week.
 
 ```bash
-kubectl create cronjob hello --image=busybox:1.37 --schedule="*/1 * * * *" -- sh -c 'date; echo hello'
+kubectl create cronjob hello --image=busybox:1.38 --schedule="*/1 * * * *" -- sh -c 'date; echo hello'
 kubectl get cronjob hello
 kubectl get jobs --watch
 
@@ -796,7 +796,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: public.ecr.aws/docker/library/nginx:1.27.2
+      - image: public.ecr.aws/docker/library/nginx:1.30.6
         name: kubeapp
         env:
           - name: APP_MODE
@@ -833,7 +833,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: public.ecr.aws/docker/library/nginx:1.27.2
+      - image: public.ecr.aws/docker/library/nginx:1.30.6
         name: kubeapp
         envFrom:
           - configMapRef:
@@ -867,7 +867,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: public.ecr.aws/docker/library/nginx:1.27.2
+      - image: public.ecr.aws/docker/library/nginx:1.30.6
         name: kubeapp
         volumeMounts:
           - mountPath: /data/config
@@ -909,7 +909,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: public.ecr.aws/docker/library/nginx:1.27.2
+      - image: public.ecr.aws/docker/library/nginx:1.30.6
         name: kubeapp
         volumeMounts:
           - mountPath: /data/config
@@ -958,7 +958,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: public.ecr.aws/docker/library/nginx:1.27.2
+      - image: public.ecr.aws/docker/library/nginx:1.30.6
         name: kubeapp
         envFrom:
           - secretRef:
@@ -991,7 +991,7 @@ spec:
         app: kubeapp
     spec:
       containers:
-      - image: public.ecr.aws/docker/library/nginx:1.27.2
+      - image: public.ecr.aws/docker/library/nginx:1.30.6
         name: kubeapp
         volumeMounts:
           - mountPath: /data/config
@@ -1045,7 +1045,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx
+    image: nginx:1.30.6
   nodeSelector:
     disk: ssd
 EOF
@@ -1079,7 +1079,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx
+    image: nginx:1.30.6
   nodeSelector:
     disk: hdd
   tolerations:
@@ -1106,7 +1106,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx
+    image: nginx:1.30.6
   nodeSelector:
     disk: hdd
 EOF
@@ -1153,7 +1153,7 @@ spec:
     spec:
       containers:
       - name: redis
-        image: redis
+        image: redis:8.10.3
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -1195,7 +1195,7 @@ spec:
     spec:
       containers:
       - name: webserver
-        image: nginx
+        image: nginx:1.30.6
       affinity:
         podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -1245,7 +1245,7 @@ spec:
     spec:
       containers:
       - name: web-app
-        image: nginx
+        image: nginx:1.30.6
       affinity:
         podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -1293,7 +1293,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx
+    image: nginx:1.30.6
 EOF
 
 ls /etc/kubernetes/manifests/
@@ -1322,7 +1322,7 @@ metadata:
 spec:
   containers:
   - name: kubeapp
-    image: kubenesia/kubeapp
+    image: kubenesia/kubeapp:1.2.0
     resources:
       requests:
         memory: 128Mi
@@ -1413,7 +1413,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: nginx:1.27.2
+          image: nginx:1.30.6
           resources:
             requests:
               cpu: 1000m
@@ -1447,7 +1447,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx
+    image: nginx:1.30.6
     imagePullPolicy: IfNotPresent
   priorityClassName: high-priority
 EOF
@@ -1463,7 +1463,7 @@ kubectl get priorityclass
 ## Install metrics-server
 
 ```bash
-curl -fsSLo metrics-server.yaml https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+curl -fsSLo metrics-server.yaml https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.1/components.yaml
 vim metrics-server.yaml
 # add --kubelet-insecure-tls under args
 kubectl apply -f metrics-server.yaml
@@ -1707,13 +1707,13 @@ spec:
       targetPort: 8080
 EOF
 kubectl apply -f nginx-service.yaml
-kubectl create deployment nginx --image=nginx:1.27.2
+kubectl create deployment nginx --image=nginx:1.30.6
 kubectl port-forward svc/nginx --address 0.0.0.0 1234:8080
 curl localhost:1234
 ```
 
 - Does it work? If not, what's wrong?
-- Create a Deployment `echo` with image `mendhak/http-https-echo:31`. Create a Service with type `NodePort` to expose the previous Deployment with the same name. The application port is `8080`. Also create a HPA with target CPU utilization of 60% and max replicas of 5.
+- Create a Deployment `echo` with image `mendhak/http-https-echo:43`. Create a Service with type `NodePort` to expose the previous Deployment with the same name. The application port is `8080`. Also create a HPA with target CPU utilization of 60% and max replicas of 5.
 
 ## Ingress
 
@@ -1763,8 +1763,8 @@ kubectl delete deployment green
 kubectl delete svc blue
 kubectl delete svc green
 
-kubectl create deployment blue --image=mendhak/http-https-echo:31
-kubectl create deployment green --image=mendhak/http-https-echo:31
+kubectl create deployment blue --image=mendhak/http-https-echo:43
+kubectl create deployment green --image=mendhak/http-https-echo:43
 
 kubectl expose deployment blue --port=80 --target-port=8080
 kubectl expose deployment green --port=80 --target-port=8080
@@ -1876,7 +1876,7 @@ spec:
     spec:
       containers:
       - name: echo
-        image: mendhak/http-https-echo:31
+        image: mendhak/http-https-echo:43
         ports:
         - containerPort: 8080
 ---
@@ -1933,7 +1933,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/re
 
 ### Install helm
 ```bash
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
 ```
 
 ### Install Gateway controller implementation
@@ -1976,8 +1976,8 @@ EOF
 ### Route by host header
 
 ```bash
-kubectl create deployment blue --image=mendhak/http-https-echo:31
-kubectl create deployment green --image=mendhak/http-https-echo:31
+kubectl create deployment blue --image=mendhak/http-https-echo:43
+kubectl create deployment green --image=mendhak/http-https-echo:43
 
 kubectl expose deployment blue --port=80 --target-port=8080
 kubectl expose deployment green --port=80 --target-port=8080
@@ -2121,7 +2121,7 @@ curl --connect-to ::$WORKER_IP:30080 example.com/weight
 
 ### Review
 
-- Create two deployments `blue` and `green` with image `mendhak/http-https-echo:31`.
+- Create two deployments `blue` and `green` with image `mendhak/http-https-echo:43`.
 - The deployment should be accessible on `loadbalance.com` with 80:20 balancing between blue and green. Use HTTPRoute with name `loadbalance` to achieve this.
 - Run `curl -s --connect-to ::$WORKER_IP:30180 loadbalance.com | grep hostname` multiple times to check the result.
 
@@ -2169,9 +2169,9 @@ kubectl delete netpol deny-from-other-namespaces
 ```bash
 kubectl create ns marketplace
 
-kubectl create deployment backend --namespace=marketplace --image=nginx:1.27.2
-kubectl create deployment frontend --namespace=marketplace --image=nginx:1.27.2
-kubectl create deployment experiment --namespace=marketplace --image=nginx:1.27.2
+kubectl create deployment backend --namespace=marketplace --image=nginx:1.30.6
+kubectl create deployment frontend --namespace=marketplace --image=nginx:1.30.6
+kubectl create deployment experiment --namespace=marketplace --image=nginx:1.30.6
 
 kubectl expose deployment backend --namespace=marketplace --port=80
 kubectl expose deployment frontend --namespace=marketplace --port=80
@@ -2248,7 +2248,7 @@ curl -m 5 backend.marketplace # fail
   - `promo`
 - Create NetworkPolicy `allow-from-ride` on namespace `food` to allow access from namespace `ride`.
 - Create NetworkPolicy `allow-gateway-from-travel` on namespace `ride` to only allow pod with label `app=travel` to access pod with label `app=gateway` inside the same namespace.
-- All deployments should use image `nginx:1.27.2`.
+- All deployments should use image `nginx:1.30.6`.
 - All deployments should have a Service with type `ClusterIP`.
 
 # Storage
@@ -2264,12 +2264,12 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:1.27.2
+    image: nginx:1.30.6
     volumeMounts:
     - name: wwwroot
       mountPath: /usr/share/nginx/html
   - name: caddy
-    image: caddy:2.8.4
+    image: caddy:2.11.7
     command:
       - caddy
       - file-server
@@ -2324,13 +2324,13 @@ metadata:
 spec:
   initContainers:
   - name: init
-    image: busybox:1.37
+    image: busybox:1.38
     command: ["sh", "-c", "echo init done > /var/log/app/init.log"]
     volumeMounts:
     - name: logs
       mountPath: /var/log/app
   - name: log-shipper
-    image: busybox:1.37
+    image: busybox:1.38
     restartPolicy: Always
     command: ["sh", "-c", "tail -F /var/log/app/app.log"]
     volumeMounts:
@@ -2338,7 +2338,7 @@ spec:
       mountPath: /var/log/app
   containers:
   - name: app
-    image: busybox:1.37
+    image: busybox:1.38
     command: ["sh", "-c", "while true; do date >> /var/log/app/app.log; sleep 5; done"]
     volumeMounts:
     - name: logs
@@ -2429,7 +2429,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:1.27.2
+    image: nginx:1.30.6
     volumeMounts:
     - name: html
       mountPath: /usr/share/nginx/html
@@ -2507,7 +2507,7 @@ kubectl apply -f data-pvc.yaml
 # Pending until a Pod uses it, because of WaitForFirstConsumer
 kubectl get pvc data
 
-kubectl run data --image=nginx:1.27.2 --overrides='{"spec": {"volumes": [{"name": "data", "persistentVolumeClaim": {"claimName": "data"}}], "containers": [{"name": "data", "image": "nginx:1.27.2", "volumeMounts": [{"name": "data", "mountPath": "/data"}]}]}}'
+kubectl run data --image=nginx:1.30.6 --overrides='{"spec": {"volumes": [{"name": "data", "persistentVolumeClaim": {"claimName": "data"}}], "containers": [{"name": "data", "image": "nginx:1.30.6", "volumeMounts": [{"name": "data", "mountPath": "/data"}]}]}}'
 kubectl get pvc data
 kubectl get pv
 
@@ -2737,7 +2737,7 @@ kubectl get pods --token=$TOKEN # ok
 kubectl get secrets --token=$TOKEN # fail
 
 # use the ServiceAccount in a Pod
-kubectl run nginx --image=nginx:1.27.2 --overrides='{"spec": {"serviceAccountName": "pod-reader"}}'
+kubectl run nginx --image=nginx:1.30.6 --overrides='{"spec": {"serviceAccountName": "pod-reader"}}'
 kubectl get pod nginx -o jsonpath='{.spec.serviceAccountName}'
 
 kubectl delete pod nginx
@@ -3005,7 +3005,7 @@ Change manifests without templates. Built into kubectl.
 ```bash
 mkdir -p kustomize/base kustomize/overlays/prod
 
-kubectl create deployment web --image=nginx:1.27.2 $do > kustomize/base/deployment.yaml
+kubectl create deployment web --image=nginx:1.30.6 $do > kustomize/base/deployment.yaml
 
 cat <<EOF >kustomize/base/kustomization.yaml
 resources:
@@ -3025,7 +3025,7 @@ replicas:
   count: 3
 images:
 - name: nginx
-  newTag: 1.27.3
+  newTag: 1.31.8
 EOF
 
 kubectl kustomize kustomize/overlays/prod
