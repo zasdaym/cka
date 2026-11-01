@@ -28,10 +28,10 @@ net.ipv4.ip_forward = 1
 EOF
 
 sudo sysctl --system
-echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 
-# disable memory swap
+# disable memory swap, also after reboot
 sudo swapoff -a
+sudo sed -i '/\sswap\s/ s/^/#/' /etc/fstab
 ```
 
 ### Install containerd
@@ -43,6 +43,7 @@ sudo apt-get update
 sudo apt-get install apt-transport-https ca-certificates curl gnupg lsb-release -y
 
 # add containerd repository
+sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
@@ -69,9 +70,9 @@ sudo systemctl is-active containerd
 
 ```bash
 # add kubernetes repository
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
 # install kubernetes tools
 sudo apt-get update
@@ -83,8 +84,10 @@ sudo apt-mark hold kubelet kubeadm kubectl
 
 ### Init cluster
 
+The Pod CIDR must not overlap with the node network. The CNI must use the same CIDR.
+
 ```bash
-sudo kubeadm init
+sudo kubeadm init --pod-network-cidr=172.16.0.0/16
 ```
 
 ### Configure easy access to cluster
@@ -125,7 +128,9 @@ sudo kubeadm join $CONTROLLER_IP:6443 --token $JOIN_TOKEN --discovery-token-ca-c
 ## CNI installation (controller)
 
 ```bash
-curl https://raw.githubusercontent.com/projectcalico/calico/v3.28.2/manifests/calico.yaml -O
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/calico.yaml -O
+# uncomment CALICO_IPV4POOL_CIDR and set it to the --pod-network-cidr value
+vim calico.yaml
 kubectl apply -f calico.yaml
 kubectl get pods -n kube-system | grep calico
 ```
@@ -146,11 +151,52 @@ Cut current line: dd
 Undo: u
 Redo: Ctrl + r
 Find: /
-Replace all occurences: :%s/oldword/newword/g
-Start vertical selection: Shift + v
+Replace all occurrences: :%s/oldword/newword/g
+Start line selection: Shift + v
+Start vertical (block) selection: Ctrl + v
+Indent / unindent selection: > / <
 Go to beginning of file: gg
 Go to end of file: Shift + g
 Exit: Shift + zz / esc :wq
+```
+
+### vim settings for YAML
+
+```bash
+cat <<EOF >>~/.vimrc
+set expandtab tabstop=2 shiftwidth=2
+EOF
+```
+
+## Shell setup for the exam
+
+```bash
+alias k=kubectl
+complete -o default -F __start_kubectl k
+export do="--dry-run=client -o yaml"
+export now="--force --grace-period=0"
+
+# usage
+k run nginx --image=nginx:1.27.2 $do > nginx.yaml
+k delete pod nginx $now
+```
+
+## Find fields fast
+
+```bash
+kubectl explain pod.spec.containers.readinessProbe
+kubectl explain deployment.spec --recursive | less
+```
+
+## Get values with jsonpath
+
+`yq` and `jq` are possibly not installed on the exam nodes. Use jsonpath.
+
+```bash
+kubectl get pods -o jsonpath='{.items[*].metadata.name}'
+kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.nodeName}{"\n"}{end}'
+kubectl get pods -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeName
+kubectl get pods --sort-by=.metadata.creationTimestamp
 ```
 
 # Workload & Scheduling
@@ -158,7 +204,7 @@ Exit: Shift + zz / esc :wq
 ## Pod
 
 - The smallest unit of workload in Kubernetes.
-- Can't be updated.
+- Most fields can't be updated. Some can, for example container image and tolerations (add only).
 - Not recommended to create it directly. Instead, create Deployment or DaemonSet.
 
 ### Create Pod
@@ -181,7 +227,7 @@ spec:
 EOF
 
 kubectl apply -f nginx.yaml
-kuebctl get pods
+kubectl get pods
 kubectl get pods -o wide
 kubectl get pods nginx
 kubectl delete pod nginx
@@ -349,7 +395,7 @@ kubectl get pods
 
 ```bash
 kubectl describe deployment kubeapp | grep Image
-kubectl get deployment kubeapp -o yaml | yq '.spec.template.spec.containers[].image'
+kubectl get deployment kubeapp -o jsonpath='{.spec.template.spec.containers[*].image}'
 ```
 
 ### Rollback Deployment
@@ -361,7 +407,7 @@ kubectl rollout undo deployment kubeapp --to-revision=$REVISION_NUMBER
 
 ### Startup Probe
 
-Used to protect slow starting containers from serving traffic when they are not ready.
+Used to protect slow starting containers. Liveness and readiness probes start only after the startup probe succeeds, so the kubelet does not kill the container while it starts.
 
 ```bash
 cat <<EOF >kuard.yaml
@@ -401,7 +447,7 @@ kubectl describe pods -l app=kuard
 
 ### Liveness Probe
 
-Used to check the health of the Pod periodically.
+Used to check the health of the container periodically. If the probe fails, the kubelet restarts the container.
 
 ```bash
 cat <<EOF >kuard.yaml
@@ -437,6 +483,56 @@ EOF
 kubectl apply -f kuard.yaml
 kubectl get pods
 kubectl describe pods -l app=kuard
+```
+
+### Readiness Probe
+
+Used to check if the container is ready to receive traffic. If the probe fails, the Pod is removed from the Service endpoints. The container is not restarted.
+
+```bash
+cat <<EOF >kuard.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kuard
+  name: kuard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kuard
+  template:
+    metadata:
+      labels:
+        app: kuard
+    spec:
+      containers:
+      - image: dlneintr/kuard:0.2.0
+        name: kuard-amd64
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+EOF
+
+kubectl apply -f kuard.yaml
+kubectl get pods
+kubectl expose deployment kuard --port=80 --target-port=8080
+kubectl get endpointslices -l kubernetes.io/service-name=kuard
+```
+
+Other probe types: `tcpSocket` (port is open) and `exec` (command exits with 0).
+
+```yaml
+readinessProbe:
+  tcpSocket:
+    port: 8080
+livenessProbe:
+  exec:
+    command: ["cat", "/tmp/healthy"]
 ```
 
 ### Review
@@ -505,17 +601,31 @@ kubectl apply -f fluentd-elasticsearch-daemonset.yaml
 kubectl -n kube-system get ds fluentd-elasticsearch
 kubectl -n kube-system get ds fluentd-elasticsearch -o wide
 kubectl -n kube-system get pods -o wide | grep fluentd
-kubectl delete -f fluentd-elasticsearch.yaml
+kubectl delete -f fluentd-elasticsearch-daemonset.yaml
 ```
 
 ### Review
 
-- Create a DaemonSet with image `nginx:1.27.2`, make sure it doesn't scheduled on controller node.
-- Create a DaemonSet with image `httpd:2.4.62`, make sure it scheduled on all nodes including the controller.
+- Create a DaemonSet with image `nginx:1.27.2`, make sure it isn't scheduled on controller node.
+- Create a DaemonSet with image `httpd:2.4.62`, make sure it is scheduled on all nodes including the controller.
 
 ## StatefulSet
 
-Like Deployment, but used to deploy stateful application. Maintain a sticky identity for each Pod.
+Like Deployment, but used to deploy stateful application. Maintain a sticky identity for each Pod:
+
+- Stable name: `mysql-0`, `mysql-1`, ...
+- Stable DNS name through a headless Service: `mysql-0.mysql`.
+- Stable storage: `volumeClaimTemplates` creates one PVC for each Pod. The PVC stays when the Pod is recreated.
+
+### Install a StorageClass
+
+`volumeClaimTemplates` needs a StorageClass for dynamic provisioning. Install local-path-provisioner and make it the default StorageClass.
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml
+kubectl patch storageclass local-path -p '{"metadata": {"annotations": {"storageclass.kubernetes.io/is-default-class": "true"}}}'
+kubectl get storageclass
+```
 
 ### Create StatefulSet
 
@@ -570,15 +680,20 @@ spec:
         volumeMounts:
         - name: data
           mountPath: /var/lib/mysql
-      volumes:
-      - name: data
-        hostPath:
-          path: /data/mysql
-          type: DirectoryOrCreate
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
 EOF
 
 kubectl apply -f mysql-statefulset.yaml
 kubectl get sts -o wide
+kubectl get pvc
 ```
 
 ### Create database
@@ -607,6 +722,37 @@ show tables;
 
 - Try to create a StatefulSet for postgres.
 - Check [here](https://hub.docker.com/_/postgres) for information related to the container image.
+
+## Job
+
+Run Pods until a number of them complete successfully. Used for one-time tasks.
+
+```bash
+kubectl create job pi --image=perl:5.40 $do -- perl -Mbignum=bpi -wle 'print bpi(100)' > pi-job.yaml
+vim pi-job.yaml
+# set spec.completions: 3, spec.parallelism: 2, spec.backoffLimit: 2
+
+kubectl apply -f pi-job.yaml
+kubectl get jobs
+kubectl get pods -l job-name=pi
+kubectl logs job/pi
+```
+
+## CronJob
+
+Create a Job on a schedule. The schedule uses cron format: minute, hour, day of month, month, day of week.
+
+```bash
+kubectl create cronjob hello --image=busybox:1.37 --schedule="*/1 * * * *" -- sh -c 'date; echo hello'
+kubectl get cronjob hello
+kubectl get jobs --watch
+
+# run the CronJob now, without waiting for the schedule
+kubectl create job hello-manual --from=cronjob/hello
+
+kubectl explain cronjob.spec | grep -E 'successfulJobsHistoryLimit|failedJobsHistoryLimit|concurrencyPolicy|suspend'
+kubectl delete cronjob hello
+```
 
 ## ConfigMap
 
@@ -696,7 +842,7 @@ EOF
 
 kubectl apply -f kubeapp-deployment.yaml
 kubectl exec -ti deployment/kubeapp -- sh
-printenv | egrep 'COLOR=|MODE=|SERVICE='
+printenv | grep -E 'COLOR=|MODE=|SERVICE='
 exit
 ```
 
@@ -738,7 +884,7 @@ EOF
 kubectl apply -f kubeapp-deployment.yaml
 kubectl exec -ti deployment/kubeapp -- sh
 ls /data/config
-cat /data/config
+cat /data/config/mode-file-name
 exit
 ```
 
@@ -777,7 +923,7 @@ EOF
 kubectl apply -f kubeapp-deployment.yaml
 kubectl exec -ti deployment/kubeapp -- sh
 ls /data/config
-cat /data/config
+cat /data/config/MODE
 exit
 ```
 
@@ -820,7 +966,7 @@ spec:
 EOF
 
 kubectl exec -ti deployment/kubeapp -- sh
-printenv | egrep 'COLOR=|MODE=|SERVICE='
+printenv | grep -E 'COLOR=|MODE='
 exit
 ```
 
@@ -852,13 +998,13 @@ spec:
             name: config
       volumes:
         - name: config
-          secretRef:
-            name: kubeapp
+          secret:
+            secretName: kubeapp
 EOF
 
 kubectl exec -ti deployment/kubeapp -- sh
 ls /data/config
-cat /data/config
+cat /data/config/MODE
 exit
 ```
 
@@ -886,13 +1032,6 @@ kubectl label node worker2 --list
 kubectl get nodes --show-labels
 ```
 
-### Remove label
-
-```bash
-kubectl label node worker1 disk-
-kubectl label node worker2 disk-
-```
-
 ### Pod with nodeSelector
 
 - Pod will be scheduled to worker2.
@@ -916,14 +1055,17 @@ kubectl get nodes -l disk=ssd
 kubectl get pods -o wide
 ```
 
-- Try to remove the label from worker2 and recreate the pod, it will stuck in "Pending" state.
+- Try to remove the label from worker2 and recreate the pod, it will be stuck in "Pending" state. Add the label again after the test.
 
 ## Taints & Tolerations
 
 - Taints: allow node to repel or "kick" a set of pods.
 - Tolerations: allow pods to "bypass" taints.
+- A toleration only permits a Pod to run on a tainted node. It does not attract the Pod to that node. Use nodeSelector or node affinity for that.
 
 ### Node selector + Taints + Tolerations
+
+- Pod will be scheduled to worker1.
 
 ```bash
 kubectl taint nodes worker1 role=gpu:NoSchedule
@@ -938,6 +1080,8 @@ spec:
   containers:
   - name: nginx
     image: nginx
+  nodeSelector:
+    disk: hdd
   tolerations:
   - key: role
     operator: Equal
@@ -950,6 +1094,8 @@ kubectl get pods -o wide
 ```
 
 ### Node selector + Taints without Tolerations
+
+- Pod will be stuck in "Pending" state.
 
 ```bash
 cat <<EOF >pod-myapp-gpu-without-tolerations.yaml
@@ -967,9 +1113,17 @@ EOF
 
 kubectl apply -f pod-myapp-gpu-without-tolerations.yaml
 kubectl get pods -o wide
+kubectl describe pod myapp-gpu-without-tolerations | grep -A 5 Events
 
 # Remove taint
 kubectl taint nodes worker1 role-
+```
+
+### Remove label
+
+```bash
+kubectl label node worker1 disk-
+kubectl label node worker2 disk-
 ```
 
 ## Pod affinity & anti-affinity
@@ -1117,16 +1271,20 @@ EOF
 
 kubectl apply -f webserver-pref.yaml
 kubectl get pod
-kubectl scale deploy webserver-pref --replicas=3
+kubectl scale deploy webserver-pref --replicas=4
 kubectl get pod
 ```
 
 ## Static Pod
 
 - Manually run a pod on a specific node, bypassing the scheduler.
+- The kubelet watches the directory in `staticPodPath` of `/var/lib/kubelet/config.yaml`. kubeadm sets it to `/etc/kubernetes/manifests`.
+- The Pod name gets the node name as suffix, for example `pod-static-worker1`.
+- You can't delete a static pod with kubectl. Remove the manifest file instead.
 
 ```bash
-ssh $WORKER
+ssh $WORKER_IP
+sudo grep staticPodPath /var/lib/kubelet/config.yaml
 cat <<EOF | sudo tee /etc/kubernetes/manifests/pod-static.yaml
 apiVersion: v1
 kind: Pod
@@ -1148,6 +1306,7 @@ kubectl get pods -o wide
 
 - Used to control the resource usage (CPU and memory) of a Pod.
 - Best practice: do not use CPU limit to prevent throttling: (https://home.robusta.dev/blog/stop-using-cpu-limits)
+  - In the exam, set all requests and limits that the task asks for.
 - Always define resource requests
   - Easier capacity planning
   - Less surprise
@@ -1311,7 +1470,7 @@ kubectl apply -f metrics-server.yaml
 kubectl -n kube-system get pods
 kubectl top nodes
 kubectl top pods -A
-kubectl describe nodes k8s-worker1-trainer
+kubectl describe nodes $WORKER_NODE
 ```
 
 ## Create Deployment + HPA
@@ -1431,8 +1590,8 @@ EOF
 kubectl apply -f kubeapp-deployment.yaml -f kubeapp-service.yaml
 kubectl get svc
 kubectl describe svc kubeapp
-kubectl get ep
-kubectl describe ep
+kubectl get endpointslices -l kubernetes.io/service-name=kubeapp
+kubectl describe endpointslices -l kubernetes.io/service-name=kubeapp
 kubectl get pods -o wide
 kubectl get pods -l app=kubeapp
 
@@ -1455,9 +1614,9 @@ spec:
   externalName: google.com
 EOF
 
-kubectl apply -f gogolele.yaml
+kubectl apply -f gogolele-service.yaml
 kubectl get svc
-kubectl describe svc get-ip
+kubectl describe svc gogolele
 
 kubectl run test -it --rm --image=kubenesia/kubebox -- sh
 curl gogolele
@@ -1489,7 +1648,7 @@ kubectl get svc
 kubectl describe svc kubeapp
 
 export WORKER_IP=CHANGE_ME
-export NODE_PORT=$(kubectl get svc kubeapp -o yaml | yq '.spec.ports[0].nodePort')
+export NODE_PORT=$(kubectl get svc kubeapp -o jsonpath='{.spec.ports[0].nodePort}')
 curl "$WORKER_IP:$NODE_PORT"
 ```
 
@@ -1559,11 +1718,12 @@ curl localhost:1234
 ## Ingress
 
 - Route HTTP/HTTPS traffic into cluster workloads.
+- The ingress-nginx project is retired and gets no more updates. Use Gateway API for new work. The exam can still ask for Ingress.
 
 ### Install ingress controller
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0-beta.0/deploy/static/provider/baremetal/deploy.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/baremetal/deploy.yaml
 kubectl get pods -n ingress-nginx
 kubectl get svc -n ingress-nginx
 ```
@@ -1588,7 +1748,7 @@ kubectl get ingress
 kubectl get ingress blue -o yaml
 kubectl get ingress green -o yaml
 
-export NODE_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o yaml | yq '.spec.ports[0].nodePort')
+export NODE_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[0].nodePort}')
 echo $NODE_PORT
 
 curl http://blue.$WORKER_IP.sslip.io:$NODE_PORT
@@ -1661,18 +1821,18 @@ curl http://$WORKER_IP.sslip.io:$NODE_PORT/green
 # Start from clean state
 kubectl delete ingress blue green
 
+# Set IP to primary IP of the machine
+export IP=$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+
 # Create self-signed certificate
 openssl req -x509 -nodes -days 365 -keyout tls.key -out tls.crt -subj "/CN=*.$IP.sslip.io"
 kubectl create secret tls sslip-io --key tls.key --cert tls.crt
-
-# Set IP to primary IP of the machine
-export IP=$(ip -br a | grep ens | awk '{print $3}' | cut -d / -f 1)
 
 kubectl create ingress blue --class nginx --rule=blue.$IP.sslip.io/*=blue:80,tls=sslip-io
 kubectl create ingress green --class nginx --rule=green.$IP.sslip.io/*=green:80,tls=sslip-io
 
 # Find NodePort for https
-export HTTPS_NODE_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o yaml | yq '.spec.ports[1].nodePort')
+export HTTPS_NODE_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[1].nodePort}')
 curl --insecure https://blue.$IP.sslip.io:$HTTPS_NODE_PORT
 ```
 
@@ -1751,7 +1911,7 @@ spec:
                 number: 8080
 EOF
 kubectl apply -f echo.yaml
-export NGINX_PORT=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o yaml | yq '.spec.ports[0].nodePort')
+export NGINX_PORT=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.spec.ports[0].nodePort}')
 curl "http://echo.$WORKER1_IP.sslip.io:$NGINX_PORT"
 ```
 
@@ -1764,8 +1924,11 @@ curl "http://echo.$WORKER1_IP.sslip.io:$NGINX_PORT"
 nginx-fabric-gateway will be used here as Gateway API implementation. For other implementations, check here https://gateway-api.sigs.k8s.io/implementations/.
 
 ### Install Gateway CRD
+
+Use the Gateway API version that the controller supports. nginx-gateway-fabric 2.8.0 supports v1.6.3.
+
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml
 ```
 
 ### Install helm
@@ -1786,7 +1949,7 @@ nginx:
         listenerPort: 80
 EOF
 
-helm upgrade nginx-gateway oci://ghcr.io/nginx/charts/nginx-gateway-fabric --version 2.0.2 --create-namespace -n nginx-gateway -f /tmp/nginx-gateway.yaml
+helm upgrade --install nginx-gateway oci://ghcr.io/nginx/charts/nginx-gateway-fabric --version 2.8.0 --create-namespace -n nginx-gateway -f /tmp/nginx-gateway.yaml
 ```
 
 ### Create Gateway
@@ -2072,7 +2235,7 @@ kubectl run test -it -n default --rm --image=kubenesia/kubebox -- sh
 curl -m 5 backend.marketplace # fail
 ```
 
-## Review
+### Review
 
 - Create new namespaces `ride` and `food`.
 - Inside namespace `ride`, create 3 deployments:
@@ -2125,6 +2288,7 @@ EOF
 
 kubectl apply -f pod-with-empty-dir.yaml
 
+# port-forward blocks the terminal. Run curl in a second terminal, then stop port-forward with Ctrl + c.
 kubectl exec -ti -c nginx pod-with-empty-dir -- bash
 echo "Test emptyDir volume with containers" >/usr/share/nginx/html/index.html
 exit
@@ -2146,17 +2310,64 @@ kubectl port-forward pod-with-empty-dir 1234:8080
 curl -v localhost:1234
 ```
 
+## Init container and sidecar container
+
+- Init container: runs to completion before the app containers start.
+- Sidecar container: an init container with `restartPolicy: Always`. It starts before the app containers and runs for the full life of the Pod.
+
+```bash
+cat <<EOF >pod-with-sidecar.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-sidecar
+spec:
+  initContainers:
+  - name: init
+    image: busybox:1.37
+    command: ["sh", "-c", "echo init done > /var/log/app/init.log"]
+    volumeMounts:
+    - name: logs
+      mountPath: /var/log/app
+  - name: log-shipper
+    image: busybox:1.37
+    restartPolicy: Always
+    command: ["sh", "-c", "tail -F /var/log/app/app.log"]
+    volumeMounts:
+    - name: logs
+      mountPath: /var/log/app
+  containers:
+  - name: app
+    image: busybox:1.37
+    command: ["sh", "-c", "while true; do date >> /var/log/app/app.log; sleep 5; done"]
+    volumeMounts:
+    - name: logs
+      mountPath: /var/log/app
+  volumes:
+  - name: logs
+    emptyDir: {}
+EOF
+
+kubectl apply -f pod-with-sidecar.yaml
+kubectl get pod pod-with-sidecar
+kubectl logs pod-with-sidecar -c log-shipper -f
+```
+
+To add a sidecar to an existing Deployment, edit `spec.template.spec` with `kubectl edit deployment $NAME`. Add the shared volume, the `volumeMounts` in both containers, and the sidecar container.
+
 ## Set up NFS server
 
 ```bash
-# Master
+# Controller
 sudo apt-get install --yes nfs-kernel-server
+sudo mkdir -p /srv/nfs4
+sudo chown 65534:65534 /srv/nfs4
+# change 10.0.0.0/8 to the network of your nodes
 cat <<EOF | sudo tee /etc/exports
 /srv/nfs4 10.0.0.0/8(rw,no_subtree_check,all_squash)
 EOF
 sudo systemctl restart nfs-kernel-server
-sudo mkdir /srv/nfs4
-sudo chown 65534:65534 /srv/nfs4
+sudo exportfs -v
 
 # Worker
 sudo apt-get install --yes nfs-common
@@ -2245,6 +2456,65 @@ kubectl delete pvc nginx
 kubectl delete pv nginx
 ```
 
+## Match a PVC to an existing PV
+
+A PVC binds to a PV only when all of these match:
+
+- `storageClassName` is the same. Use `""` to bind to a PV without a StorageClass.
+- `accessModes` of the PV include the requested mode.
+- Capacity of the PV is equal to or larger than the request.
+- `volumeMode` is the same (default `Filesystem`).
+
+```bash
+kubectl get pv -o custom-columns=NAME:.metadata.name,CLASS:.spec.storageClassName,MODES:.spec.accessModes,SIZE:.spec.capacity.storage,STATUS:.status.phase
+```
+
+## Dynamic provisioning with StorageClass
+
+- A StorageClass tells the provisioner how to create a PV when a PVC asks for one.
+- `reclaimPolicy`: `Delete` (default) removes the PV with the PVC. `Retain` keeps the PV and data.
+- `volumeBindingMode`: `Immediate` (default) creates the PV at once. `WaitForFirstConsumer` waits for a Pod, so the PV is created on the node of the Pod.
+- This example uses the local-path provisioner from the StatefulSet section.
+
+```bash
+cat <<EOF >local-retain-storageclass.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-retain
+provisioner: rancher.io/local-path
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: false
+EOF
+kubectl apply -f local-retain-storageclass.yaml
+
+cat <<EOF >data-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+spec:
+  storageClassName: local-retain
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+kubectl apply -f data-pvc.yaml
+
+# Pending until a Pod uses it, because of WaitForFirstConsumer
+kubectl get pvc data
+
+kubectl run data --image=nginx:1.27.2 --overrides='{"spec": {"volumes": [{"name": "data", "persistentVolumeClaim": {"claimName": "data"}}], "containers": [{"name": "data", "image": "nginx:1.27.2", "volumeMounts": [{"name": "data", "mountPath": "/data"}]}]}}'
+kubectl get pvc data
+kubectl get pv
+
+# make a StorageClass the default
+kubectl patch storageclass local-retain -p '{"metadata": {"annotations": {"storageclass.kubernetes.io/is-default-class": "true"}}}'
+```
+
 # Security
 
 ## Create additional user
@@ -2262,11 +2532,35 @@ sudo openssl x509 -req -in andy.csr -CA /etc/kubernetes/pki/ca.crt -CAkey /etc/k
 openssl x509 -in andy.crt -text -noout
 ```
 
+### Sign with CertificateSigningRequest API
+
+Alternative to signing with `ca.key`. Use this when you have no access to the CA key.
+
+```bash
+cat <<EOF >andy-csr.yaml
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: andy
+spec:
+  request: $(base64 -w 0 andy.csr)
+  signerName: kubernetes.io/kube-apiserver-client
+  expirationSeconds: 86400
+  usages:
+  - client auth
+EOF
+kubectl apply -f andy-csr.yaml
+
+kubectl get csr
+kubectl certificate approve andy
+kubectl get csr andy -o jsonpath='{.status.certificate}' | base64 -d > andy.crt
+```
+
 ### Create new kubeconfig context
 
 ```bash
 # Create new context for the new user
-kubectl config set-credentials andy --client-certificate=andy.crt --client-key=andy.key
+kubectl config set-credentials andy --client-certificate=andy.crt --client-key=andy.key --embed-certs=true
 kubectl config set-context andy@kubernetes --cluster=kubernetes --user=andy
 
 # Change context
@@ -2332,7 +2626,7 @@ kubectl apply -f andy-clusterrolebinding.yaml
 kubectl config use-context andy@kubernetes
 
 # should success
-kubectl get pods -n kubesystem
+kubectl get pods -n kube-system
 kubectl get svc -n kube-system
 
 # should fail
@@ -2344,7 +2638,7 @@ kubectl auth can-i get svc
 kubectl auth can-i get secrets
 
 # back to admin
-kubectl config use-context admin@kubernetes
+kubectl config use-context kubernetes-admin@kubernetes
 
 # delete ClusterRole and ClusterRoleBinding
 kubectl delete clusterrolebinding andy
@@ -2423,6 +2717,35 @@ kubectl delete rolebinding andy
 kubectl delete role andy
 ```
 
+## ServiceAccount
+
+- Identity for processes that run in a Pod.
+- Bind a Role or ClusterRole to a ServiceAccount with `--serviceaccount=$NAMESPACE:$NAME`.
+
+```bash
+kubectl create serviceaccount pod-reader
+kubectl create role pod-reader --verb=get,list,watch --resource=pods
+kubectl create rolebinding pod-reader --role=pod-reader --serviceaccount=default:pod-reader
+
+# check permission without switching context
+kubectl auth can-i list pods --as=system:serviceaccount:default:pod-reader # yes
+kubectl auth can-i list secrets --as=system:serviceaccount:default:pod-reader # no
+
+# use a token of the ServiceAccount
+export TOKEN=$(kubectl create token pod-reader)
+kubectl get pods --token=$TOKEN # ok
+kubectl get secrets --token=$TOKEN # fail
+
+# use the ServiceAccount in a Pod
+kubectl run nginx --image=nginx:1.27.2 --overrides='{"spec": {"serviceAccountName": "pod-reader"}}'
+kubectl get pod nginx -o jsonpath='{.spec.serviceAccountName}'
+
+kubectl delete pod nginx
+kubectl delete rolebinding pod-reader
+kubectl delete role pod-reader
+kubectl delete serviceaccount pod-reader
+```
+
 ## Review
 
 - Create a ClusterRole and ClusterRoleBinding with name `scofield` to allow user `scofield` to:
@@ -2438,7 +2761,7 @@ kubectl delete role andy
 kubectl get pods -o wide
 
 # execute command on running pods
-kubectl exec $POD_NAME - $COMMAND
+kubectl exec $POD_NAME -- $COMMAND
 
 # interactive command
 kubectl exec -it $POD_NAME -- sh
@@ -2450,6 +2773,13 @@ kubectl get pod $POD_NAME -o yaml
 # show logs of pod
 kubectl logs $POD_NAME
 kubectl logs $POD_NAME -f
+kubectl logs $POD_NAME -c $CONTAINER_NAME
+
+# show logs of the previous container, after a crash
+kubectl logs $POD_NAME --previous
+
+# show events, newest last
+kubectl get events --sort-by=.lastTimestamp
 ```
 
 ## Debugging Service
@@ -2463,6 +2793,9 @@ kubectl describe svc $SVC_NAME
 
 # get list of pods based on labels
 kubectl get pods -l $KEY=$VALUE
+
+# no endpoints means the selector does not match any ready pod
+kubectl get endpointslices -l kubernetes.io/service-name=$SVC_NAME
 ```
 
 ## Debugging cluster
@@ -2479,8 +2812,40 @@ kubectl logs -n kube-system -l=component=kube-apiserver
 kubectl logs -n kube-system -l=component=kube-scheduler
 kubectl logs -n kube-system -l=component=kube-controller-manager
 kubectl logs -n kube-system -l=component=etcd
-sudo systemctl status kubelet
 ```
+
+## Debugging node
+
+Use these commands on the node. They also work when kube-apiserver is down and `kubectl` fails.
+
+```bash
+# kubelet status and logs
+sudo systemctl status kubelet
+sudo journalctl -u kubelet --no-pager | tail -n 50
+
+# containerd status
+sudo systemctl status containerd
+
+# containers on the node, also stopped ones
+sudo crictl ps -a
+sudo crictl logs $CONTAINER_ID
+
+# log files of control plane pods
+sudo ls /var/log/pods/
+sudo tail -n 50 /var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/*.log
+
+# static pod manifests of control plane components
+sudo ls /etc/kubernetes/manifests/
+
+# kubelet configuration
+sudo cat /var/lib/kubelet/config.yaml
+```
+
+Common causes:
+
+- Node `NotReady`: kubelet or containerd is stopped, swap is on, or the CNI is not installed.
+- kube-apiserver down: wrong flag, path, or certificate in `/etc/kubernetes/manifests/kube-apiserver.yaml`, or etcd is not reachable.
+- Pod `Pending`: no node has enough resources, a taint has no toleration, or a PVC is not bound. Check `kubectl describe pod`.
 
 # Cluster maintenance
 
@@ -2493,11 +2858,15 @@ sudo cp /etc/kubernetes/manifests/etcd.yaml etcd.yaml
 # install client tools
 sudo apt-get install etcd-client
 
+# find the certificate paths and the endpoint
+sudo grep -E 'cert-file|key-file|trusted-ca-file|listen-client-urls' /etc/kubernetes/manifests/etcd.yaml
+
 # create ns to verify restore later
 kubectl create ns before-backup
 
 # do backup
 sudo ETCDCTL_API=3 etcdctl \
+    --endpoints=https://127.0.0.1:2379 \
     --cacert=/etc/kubernetes/pki/etcd/ca.crt \
     --cert=/etc/kubernetes/pki/etcd/server.crt \
     --key=/etc/kubernetes/pki/etcd/server.key \
@@ -2506,18 +2875,25 @@ sudo ETCDCTL_API=3 etcdctl \
 kubectl delete ns before-backup
 
 # view backup result
+# in etcd 3.5 and later, `etcdctl snapshot status` is deprecated. Use `etcdutl` if it is installed.
 sudo ETCDCTL_API=3 etcdctl --write-out=table snapshot status snapshot.db
+sudo etcdutl --write-out=table snapshot status snapshot.db
 ```
 
 ## etcd restore
 
 ```bash
+# in etcd 3.5 and later, `etcdctl snapshot restore` is deprecated. Use `etcdutl` if it is installed.
 sudo ETCDCTL_API=3 etcdctl \
     --data-dir /var/lib/etcd-from-backup \
     snapshot restore snapshot.db
+sudo etcdutl --data-dir /var/lib/etcd-from-backup snapshot restore snapshot.db
 
 sudo vim /etc/kubernetes/manifests/etcd.yaml
 # replace /var/lib/etcd to /var/lib/etcd-from-backup on hostPath
+
+# wait until the kubelet restarts etcd and kube-apiserver
+sudo crictl ps | grep -E 'etcd|kube-apiserver'
 
 # ns should be restored
 kubectl get ns before-backup
@@ -2525,43 +2901,155 @@ kubectl get ns before-backup
 
 ## Version upgrade
 
+- Upgrade one minor version at a time, for example 1.36 to 1.37.
+- Upgrade the controller first, then the workers.
+- Upgrade kubeadm first. Upgrade kubelet and kubectl after `kubeadm upgrade`.
+- The packages are on hold (see installation), so remove the hold before the upgrade and set it again after.
+
 ### Controller
 
 ```bash
-kubectl -n kube-system edit configmap kubeadm-config # add featureGates.ControlPlaneKubeletLocalMode: true
 kubectl get nodes -o wide
-sudo vim /etc/apt/sources.list.d/kubernetes.list
-# set version to 1.31
+
+# upgrade kubeadm
+sudo sed -i 's/v1.36/v1.37/g' /etc/apt/sources.list.d/kubernetes.list
 sudo apt-get update && apt-cache madison kubeadm
-sudo apt-get install kubeadm=1.31.2-1.1 kubelet=1.31.2-1.1 kubectl=1.31.2-1.1
-sudo kubeadm upgrade plan --ignore-preflight-errors all
-sudo killall -s SIGTERM kube-apiserver
-sleep 20
-sudo kubeadm upgrade apply v1.31.2 --ignore-preflight-errors all
+sudo apt-mark unhold kubeadm
+sudo apt-get install -y kubeadm='1.37.*'
+sudo apt-mark hold kubeadm
+kubeadm version -o short
+
+# upgrade control plane components
+sudo kubeadm upgrade plan
+sudo kubeadm upgrade apply $(kubeadm version -o short)
+
+# upgrade kubelet and kubectl
+kubectl drain $CONTROLLER_NODE --ignore-daemonsets
+sudo apt-mark unhold kubelet kubectl
+sudo apt-get install -y kubelet='1.37.*' kubectl='1.37.*'
+sudo apt-mark hold kubelet kubectl
 sudo systemctl daemon-reload
 sudo systemctl restart kubelet
+kubectl uncordon $CONTROLLER_NODE
+
 kubectl get nodes -o wide
 ```
 
 ### Worker
 
 ```bash
-ssh $MASTER
-kubectl get nodes -o wide
-kubectl cordon $WORKER_NODE
+ssh $WORKER_IP
+
+# upgrade kubeadm
+sudo sed -i 's/v1.36/v1.37/g' /etc/apt/sources.list.d/kubernetes.list
+sudo apt-get update && apt-cache madison kubeadm
+sudo apt-mark unhold kubeadm
+sudo apt-get install -y kubeadm='1.37.*'
+sudo apt-mark hold kubeadm
+
+# upgrade kubelet configuration
+sudo kubeadm upgrade node
+
+# drain the worker from the controller
+ssh $CONTROLLER
 kubectl drain $WORKER_NODE --ignore-daemonsets --delete-emptydir-data --force
 
+# upgrade kubelet and kubectl
 ssh $WORKER_IP
-sudo vim /etc/apt/sources.list.d/kubernetes.list
-# set version to 1.31
-sudo apt-get update && apt-cache madison kubeadm
-sudo apt-get install kubeadm=1.31.2-1.1 kubelet=1.31.2-1.1 kubectl=1.31.2-1.1
-sudo kubeadm upgrade node
+sudo apt-mark unhold kubelet kubectl
+sudo apt-get install -y kubelet='1.37.*' kubectl='1.37.*'
+sudo apt-mark hold kubelet kubectl
 sudo systemctl daemon-reload
 sudo systemctl restart kubelet
 
-ssh $MASTER
+ssh $CONTROLLER
 kubectl uncordon $WORKER_NODE
+kubectl get nodes -o wide
+```
+
+# Tools
+
+## Helm
+
+Package manager for Kubernetes. A chart is a package of templates. Values change the templates.
+
+```bash
+helm repo add podinfo https://stefanprodan.github.io/podinfo
+helm repo update
+helm search repo podinfo/podinfo --versions | head
+
+# show the default values of a chart
+helm show values podinfo/podinfo --version $CHART_VERSION > values.yaml
+
+# render templates to a file, do not install
+helm template web podinfo/podinfo --version $CHART_VERSION -n web > web.yaml
+
+# install with changed values
+helm install web podinfo/podinfo --version $CHART_VERSION -n web --create-namespace --set replicaCount=2
+helm install web podinfo/podinfo --version $CHART_VERSION -n web --create-namespace -f values.yaml
+
+# install or upgrade
+helm upgrade --install web podinfo/podinfo --version $CHART_VERSION -n web --set replicaCount=3
+
+helm list -A
+helm get values web -n web
+helm history web -n web
+helm rollback web 1 -n web
+helm uninstall web -n web
+```
+
+## Kustomize
+
+Change manifests without templates. Built into kubectl.
+
+```bash
+mkdir -p kustomize/base kustomize/overlays/prod
+
+kubectl create deployment web --image=nginx:1.27.2 $do > kustomize/base/deployment.yaml
+
+cat <<EOF >kustomize/base/kustomization.yaml
+resources:
+- deployment.yaml
+EOF
+
+cat <<EOF >kustomize/overlays/prod/kustomization.yaml
+resources:
+- ../../base
+namespace: prod
+namePrefix: prod-
+labels:
+- pairs:
+    env: prod
+replicas:
+- name: web
+  count: 3
+images:
+- name: nginx
+  newTag: 1.27.3
+EOF
+
+kubectl kustomize kustomize/overlays/prod
+kubectl create ns prod
+kubectl apply -k kustomize/overlays/prod
+kubectl get deployment -n prod
+```
+
+## Custom Resource Definitions
+
+A CRD adds a new resource type to the API. Operators and controllers (for example cert-manager) use CRDs.
+
+```bash
+kubectl get crd
+kubectl get crd | grep cert-manager > crds.txt
+kubectl get crd -o name | grep cert-manager
+
+# show the fields of a custom resource
+kubectl explain certificates.spec
+kubectl explain certificates --api-version=cert-manager.io/v1
+
+# list resources of a CRD in all namespaces
+kubectl api-resources | grep cert-manager
+kubectl get certificates -A
 ```
 
 # Exam tips
