@@ -2969,69 +2969,104 @@ kubectl get nodes -o wide
 
 # Tools
 
-## Helm
-
-Package manager for Kubernetes. A chart is a package of templates. Values change the templates.
-
-```bash
-helm repo add podinfo https://stefanprodan.github.io/podinfo
-helm repo update
-helm search repo podinfo/podinfo --versions | head
-
-# show the default values of a chart
-helm show values podinfo/podinfo --version $CHART_VERSION > values.yaml
-
-# render templates to a file, do not install
-helm template web podinfo/podinfo --version $CHART_VERSION -n web > web.yaml
-
-# install with changed values
-helm install web podinfo/podinfo --version $CHART_VERSION -n web --create-namespace --set replicaCount=2
-helm install web podinfo/podinfo --version $CHART_VERSION -n web --create-namespace -f values.yaml
-
-# install or upgrade
-helm upgrade --install web podinfo/podinfo --version $CHART_VERSION -n web --set replicaCount=3
-
-helm list -A
-helm get values web -n web
-helm history web -n web
-helm rollback web 1 -n web
-helm uninstall web -n web
-```
+The CKA curriculum asks you to use Helm and Kustomize to install cluster components, for example a CNI, an ingress or Gateway controller, metrics-server, cert-manager or Argo CD.
 
 ## Kustomize
 
-Change manifests without templates. Built into kubectl.
+Change manifests without templates. Built into kubectl: `kubectl kustomize` shows the result, `kubectl apply -k` applies it.
+
+### Install CRDs from a remote kustomization
 
 ```bash
-mkdir -p kustomize/base kustomize/overlays/prod
+# show the result first
+kubectl kustomize "https://github.com/argoproj/argo-cd/manifests/crds?ref=v3.5.6" | grep '^  name:'
 
-kubectl create deployment web --image=nginx:1.30.6 $do > kustomize/base/deployment.yaml
+# these CRDs are too large for client-side apply, so use server-side apply
+kubectl apply --server-side -k "https://github.com/argoproj/argo-cd/manifests/crds?ref=v3.5.6"
+kubectl get crd | grep argoproj.io
+```
 
-cat <<EOF >kustomize/base/kustomization.yaml
+### Install metrics-server with a patch
+
+The upstream manifest does not have `--kubelet-insecure-tls`. Add it with a patch, without editing the downloaded file.
+
+```bash
+mkdir -p metrics-server
+curl -fsSLo metrics-server/components.yaml https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.1/components.yaml
+
+cat <<EOF >metrics-server/kustomization.yaml
 resources:
-- deployment.yaml
+- components.yaml
+patches:
+- target:
+    kind: Deployment
+    name: metrics-server
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: --kubelet-insecure-tls
 EOF
 
-cat <<EOF >kustomize/overlays/prod/kustomization.yaml
-resources:
-- ../../base
-namespace: prod
+kubectl kustomize metrics-server | grep -A 7 'args:'
+kubectl apply -k metrics-server
+kubectl -n kube-system rollout status deployment metrics-server
+kubectl top nodes
+```
+
+### Other common fields
+
+```yaml
+namespace: monitoring
 namePrefix: prod-
 labels:
 - pairs:
     env: prod
 replicas:
-- name: web
-  count: 3
+- name: metrics-server
+  count: 2
 images:
-- name: nginx
-  newTag: 1.31.8
-EOF
+- name: registry.k8s.io/metrics-server/metrics-server
+  newTag: v0.9.1
+```
 
-kubectl kustomize kustomize/overlays/prod
-kubectl create ns prod
-kubectl apply -k kustomize/overlays/prod
-kubectl get deployment -n prod
+## Helm
+
+Package manager for Kubernetes. A chart is a package of templates. Values change the templates.
+
+This example installs Argo CD. The Argo CD CRDs are already installed (see Kustomize above), so the chart must not install them.
+
+```bash
+helm repo add argo https://argoproj.github.io/argo-helm
+helm repo update
+helm search repo argo/argo-cd --versions | head
+
+# find the value to change
+helm show values argo/argo-cd --version 10.11.6 > argocd-values.yaml
+grep -A 2 '^crds:' argocd-values.yaml
+
+# render templates to a file, do not install
+helm template argocd argo/argo-cd --version 10.11.6 -n argocd --set crds.install=false > argocd.yaml
+grep -c 'kind: CustomResourceDefinition' argocd.yaml # 0
+
+# install with changed values
+helm install argocd argo/argo-cd --version 10.11.6 -n argocd --create-namespace --set crds.install=false
+kubectl -n argocd get pods
+
+# upgrade with a values file
+cat <<EOF >argocd-custom-values.yaml
+crds:
+  install: false
+server:
+  replicas: 2
+EOF
+helm upgrade --install argocd argo/argo-cd --version 10.11.6 -n argocd -f argocd-custom-values.yaml
+kubectl -n argocd get deployment argocd-server
+
+helm list -A
+helm get values argocd -n argocd
+helm history argocd -n argocd
+helm rollback argocd 1 -n argocd
+helm uninstall argocd -n argocd
 ```
 
 ## Custom Resource Definitions
