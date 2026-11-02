@@ -25,8 +25,8 @@ CKA training notes.
 # enable ip forwarding
 cat <<EOF | sudo tee /etc/sysctl.d/10-ipv4-forward.conf
 net.ipv4.ip_forward = 1
-echo 1 > /proc/sys/net/ipv4/ip_forward
 EOF
+echo 1 > /proc/sys/net/ipv4/ip_forward
 
 sudo sysctl --system
 
