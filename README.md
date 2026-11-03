@@ -1058,6 +1058,19 @@ kubectl get pods -o wide
 
 - Try to remove the label from worker2 and recreate the pod, it will be stuck in "Pending" state. Add the label again after the test.
 
+### Review
+
+- Label worker2 with `zone=blue`. Create Pod `blue-app` with image `nginx:1.30.6`. The Pod must run only on nodes with this label.
+- Create Deployment `reporting` with 3 replicas and image `httpd:2.4.69`. All replicas must run on worker1. Do not add a new label to the node.
+  - Hint: `kubectl get node worker1 --show-labels`
+- Run these commands. Why is the Pod Pending? Fix the Pod, do not change the node labels.
+
+```bash
+kubectl label node worker1 disk=ssd --overwrite
+kubectl run fast-disk --image=nginx:1.30.6 --overrides='{"spec": {"nodeSelector": {"disktype": "ssd"}}}'
+kubectl get pod fast-disk -o wide
+```
+
 ## Taints & Tolerations
 
 - Taints: allow node to repel or "kick" a set of pods.
@@ -1126,6 +1139,42 @@ kubectl taint nodes worker1 role-
 kubectl label node worker1 disk-
 kubectl label node worker2 disk-
 ```
+
+### Review
+
+- Taint worker2 with `env=prod:NoSchedule`. Create Deployment `prod-api` with 2 replicas and image `nginx:1.30.6`. All replicas must run on worker2 only.
+- Create Pod `admin-tools` with image `busybox:1.38` and command `sleep 3600`. The Pod must run on the controller node.
+  - Hint: `kubectl describe node $CONTROLLER_NODE | grep -A 2 Taints`
+- Create Pod `short-stay` with image `nginx:1.30.6` on worker1. Then taint worker1 with `maintenance=true:NoExecute`.
+  - What happens to the Pods on worker1?
+  - Recreate `short-stay` so that it stays on worker1 for 60 seconds after the taint, then gets evicted.
+- Remove all taints that you added in this review.
+- Run these commands. Why is the Pod Pending? Fix the Pod, do not change the node.
+
+```bash
+kubectl taint nodes worker1 team=data:NoSchedule
+cat <<EOF >pod-data.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: data
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.30.6
+  nodeSelector:
+    kubernetes.io/hostname: worker1
+  tolerations:
+  - key: team
+    operator: Equal
+    value: data
+    effect: NoExecute
+EOF
+kubectl apply -f pod-data.yaml
+kubectl get pod data -o wide
+```
+
+- After the fix, remove the taint: `kubectl taint nodes worker1 team-`
 
 ## Pod affinity & anti-affinity
 
@@ -1275,6 +1324,15 @@ kubectl get pod
 kubectl scale deploy webserver-pref --replicas=4
 kubectl get pod
 ```
+
+### Review
+
+- Create Deployment `frontend` with 2 replicas and image `nginx:1.30.6`. Each replica must run on a different node.
+  - Scale it to 3 replicas. What happens? Why?
+  - Change the rule so that all 3 replicas run, but the scheduler still tries to put them on different nodes.
+- Create Deployment `api-cache` with 1 replica and image `redis:8.10.3`. Create Deployment `api` with 3 replicas and image `nginx:1.30.6`. All `api` replicas must run on the same node as the `api-cache` Pod.
+- Label worker2 with `disk=ssd`. Create Deployment `ssd-preferred` with 4 replicas and image `nginx:1.30.6`. The replicas should run on nodes with `disk=ssd` if possible, but can run on other nodes too. Use node affinity, not nodeSelector.
+  - Hint: `kubectl explain pod.spec.affinity.nodeAffinity`
 
 ## Static Pod
 
