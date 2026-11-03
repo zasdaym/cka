@@ -1591,6 +1591,24 @@ watch kubectl get hpa
 ab -n 100000 -c 100 http://localhost:30088/
 ```
 
+### Review
+
+- Create Deployment `web` with 1 replica and image `nginx:1.30.6`. Set the CPU request to `50m`. Create HPA `web-hpa` for this Deployment with these rules:
+  - Minimum 1 and maximum 4 replicas.
+  - Target average CPU utilization is 60%.
+  - Scale down stabilization window is 30 seconds.
+  - Hint: `kubectl explain hpa.spec.behavior --api-version=autoscaling/v2`
+- Add a second metric to `web-hpa`: target average memory usage is `64Mi` per Pod.
+  - Which metric does the HPA use when both metrics give a different number of replicas?
+- Run these commands. Why does the HPA show `<unknown>` as target? Fix it, do not delete the HPA.
+
+```bash
+kubectl create deployment cache --image=redis:8.10.3
+kubectl autoscale deployment cache --min=1 --max=3 --cpu="50%"
+sleep 60
+kubectl get hpa cache
+```
+
 # Services & Networking
 
 - Containers inside the same pod can communicate via `localhost`.
