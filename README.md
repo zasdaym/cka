@@ -2592,6 +2592,99 @@ kubectl get pv
 kubectl patch storageclass local-retain -p '{"metadata": {"annotations": {"storageclass.kubernetes.io/is-default-class": "true"}}}'
 ```
 
+### Review
+
+- Create PV `logs-pv` with these properties:
+  - Capacity `1Gi`, access mode `ReadWriteOnce`, StorageClass `manual`, reclaim policy `Retain`.
+  - Type `hostPath` with path `/mnt/logs`.
+  - Create PVC `logs-pvc` that requests `500Mi` and binds to `logs-pv`.
+  - Create Pod `logger` with image `busybox:1.38`. It writes the date to `/logs/date.log` every 5 seconds. Mount `logs-pvc` at `/logs`.
+  - Which capacity does `kubectl get pvc logs-pvc` show? Why?
+- Run these commands. Why does PVC `reports` not bind to PV `reports`? Fix the PVC, do not change the PV.
+
+```bash
+cat <<EOF >reports.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: reports
+spec:
+  storageClassName: ""
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  hostPath:
+    path: /mnt/reports
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reports
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+kubectl apply -f reports.yaml
+kubectl get pv reports
+kubectl get pvc reports
+```
+
+- Run these commands. Why is PVC `archive-new` Pending? Bind it to PV `archive`. Do not delete the PV, because the data on it must stay.
+
+```bash
+cat <<EOF >archive.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: archive
+spec:
+  storageClassName: manual
+  persistentVolumeReclaimPolicy: Retain
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  hostPath:
+    path: /mnt/archive
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archive
+spec:
+  storageClassName: manual
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+kubectl apply -f archive.yaml
+kubectl get pvc archive
+kubectl delete pvc archive
+
+cat <<EOF >archive-new.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archive-new
+spec:
+  storageClassName: manual
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+kubectl apply -f archive-new.yaml
+kubectl get pv archive
+kubectl get pvc archive-new
+```
+
 # Security
 
 ## Create additional user
