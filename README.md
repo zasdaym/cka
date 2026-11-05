@@ -2916,11 +2916,48 @@ kubectl delete role pod-reader
 kubectl delete serviceaccount pod-reader
 ```
 
-## Review
+### Review
 
 - Create a ClusterRole and ClusterRoleBinding with name `scofield` to allow user `scofield` to:
-  - get, list, create, and delete ingress.
-  - get and list all pods.
+  - get, list, create, and delete Ingresses in all namespaces.
+  - get and list Pods in all namespaces.
+  - Do not give other permissions. Check the result:
+
+```bash
+kubectl auth can-i create ingresses --as=scofield -n default # yes
+kubectl auth can-i list pods --as=scofield -A # yes
+kubectl auth can-i delete pods --as=scofield -n default # no
+```
+
+- Run these commands. Why is the answer `no`? Fix the Role, do not change the RoleBinding.
+
+```bash
+kubectl create namespace ci
+kubectl create serviceaccount deployer -n ci
+cat <<EOF >deployer-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployer
+  namespace: ci
+rules:
+- apiGroups: [""]
+  resources: ["deployments"]
+  verbs: ["get", "list", "create", "update"]
+EOF
+kubectl apply -f deployer-role.yaml
+kubectl create rolebinding deployer -n ci --role=deployer --serviceaccount=ci:deployer
+kubectl auth can-i create deployments -n ci --as=system:serviceaccount:ci:deployer
+```
+
+- Run these commands. Why is the answer `no`? Fix the RoleBinding, do not change the Role.
+
+```bash
+kubectl create serviceaccount log-reader -n ci
+kubectl create role log-reader -n ci --verb=get,list --resource=pods,pods/log
+kubectl create rolebinding log-reader -n ci --role=log-reader --serviceaccount=default:log-reader
+kubectl auth can-i get pods --subresource=log -n ci --as=system:serviceaccount:ci:log-reader
+```
 
 # Troubleshooting
 
