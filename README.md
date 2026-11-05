@@ -27,7 +27,6 @@ kubectl get daemonsets -n kube-system
 
 # kubelet and containerd: services on each node, not Pods
 sudo systemctl status kubelet containerd
-sudo crictl ps
 ```
 
 - A kubeadm cluster on VMs has no cloud-controller-manager.
@@ -3261,10 +3260,6 @@ sudo journalctl -u kubelet --no-pager | tail -n 50
 # containerd status
 sudo systemctl status containerd
 
-# containers on the node, also stopped ones
-sudo crictl ps -a
-sudo crictl logs $CONTAINER_ID
-
 # log files of control plane pods
 sudo ls /var/log/pods/
 sudo tail -n 50 /var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/*.log
@@ -3373,7 +3368,7 @@ kubectl get pods -n kube-system
 kubectl get ns before-backup
 ```
 
-- `crictl` is possibly not installed. Without kubectl, check the logs in `/var/log/pods/kube-system_etcd-*/etcd/` and `/var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/`.
+- When kubectl does not work, check the logs in `/var/log/pods/kube-system_etcd-*/etcd/` and `/var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/`.
 - kube-apiserver can wait up to 5 minutes in CrashLoopBackOff after etcd is fixed. To start it now, move its manifest out of the directory and back:
 
 ```bash
