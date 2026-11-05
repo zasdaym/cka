@@ -15,11 +15,32 @@ CKA training notes.
   - kubelet: Ensures that Pods are running with Container Runtime.
   - kube-proxy: Maintains network rules on nodes to implement Service.
 
+After the installation, find each component on your cluster:
+
+```bash
+# etcd, kube-apiserver, kube-scheduler, kube-controller-manager: static Pods on the controller
+sudo ls /etc/kubernetes/manifests/
+kubectl get pods -n kube-system -o wide
+
+# kube-proxy and the CNI: one Pod on each node (DaemonSet)
+kubectl get daemonsets -n kube-system
+
+# kubelet and containerd: services on each node, not Pods
+sudo systemctl status kubelet containerd
+sudo crictl ps
+```
+
+- A kubeadm cluster on VMs has no cloud-controller-manager.
+- Example of the flow: `kubectl create deployment` sends the request to kube-apiserver, which stores it in etcd. kube-controller-manager creates the Pods. kube-scheduler selects a node for each Pod. The kubelet on that node tells containerd to start the containers.
+
 # Installation
 
 ## Common configuration
 
 ### Modify system settings
+
+- IP forwarding: each node routes Pod traffic to Pods on other nodes. Without it, Pods on different nodes cannot connect.
+- Swap: by default, the kubelet does not start when swap is on. The kubelet calculates the memory for Pods from the real memory of the node.
 
 ```bash
 # enable ip forwarding
@@ -58,6 +79,8 @@ sudo apt-get update && sudo apt-get install containerd.io -y
 
 ### Configure containerd
 
+The kubelet and containerd must use the same cgroup driver to control the CPU and memory of containers. kubeadm sets the kubelet to `systemd`, so set containerd to `systemd` too.
+
 ```bash
 sudo mkdir -p /etc/containerd
 containerd config default | sudo tee /etc/containerd/config.toml
@@ -68,6 +91,9 @@ sudo systemctl is-active containerd
 ```
 
 ### Install kubernetes tools
+
+- kubeadm: creates the cluster. kubelet: runs the Pods on each node. kubectl: the client.
+- `apt-mark hold` stops `apt upgrade` from changing the Kubernetes version. Upgrade the cluster with kubeadm (see [Version upgrade](#version-upgrade)).
 
 ```bash
 # add kubernetes repository
@@ -490,40 +516,58 @@ kubectl describe pods -l app=kuard
 
 Used to check if the container is ready to receive traffic. If the probe fails, the Pod is removed from the Service endpoints. The container is not restarted.
 
+Example: one replica of a shop loses its files. Users must not get errors from this replica, and the other replica must continue to serve them.
+
 ```bash
-cat <<EOF >kuard.yaml
+cat <<EOF >shop.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  labels:
-    app: kuard
-  name: kuard
+  name: shop
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: kuard
+      app: shop
   template:
     metadata:
       labels:
-        app: kuard
+        app: shop
     spec:
       containers:
-      - image: dlneintr/kuard:0.2.0
-        name: kuard-amd64
+      - name: nginx
+        image: nginx:1.30.6
         readinessProbe:
           httpGet:
-            path: /ready
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 10
+            path: /
+            port: 80
+          periodSeconds: 5
 EOF
 
-kubectl apply -f kuard.yaml
-kubectl get pods
-kubectl expose deployment kuard --port=80 --target-port=8080
-kubectl get endpointslices -l kubernetes.io/service-name=kuard
+kubectl apply -f shop.yaml
+kubectl rollout status deployment shop
+kubectl expose deployment shop --port=80
+kubectl describe svc shop | grep Endpoints # 2 Pod IPs
+
+# break one replica: without index.html, nginx answers 403
+export POD=$(kubectl get pods -l app=shop -o jsonpath='{.items[0].metadata.name}')
+kubectl exec $POD -- mv /usr/share/nginx/html/index.html /tmp/
+
+kubectl get pods -l app=shop --watch # READY 0/1, RESTARTS 0
+kubectl describe svc shop | grep Endpoints # 1 Pod IP
+
+# users still get 200 from the other replica
+kubectl run test -ti --rm --restart=Never --image=kubenesia/kubebox -- sh -c 'for i in 1 2 3 4 5; do curl -s -o /dev/null -w "%{http_code}\n" shop; done'
+
+# repair the replica, it becomes ready again
+kubectl exec $POD -- mv /tmp/index.html /usr/share/nginx/html/
+kubectl get pods -l app=shop --watch # READY 1/1 after some seconds
+
+kubectl delete svc shop
+kubectl delete deployment shop
 ```
+
+- `kubectl get endpointslices` also shows the Pods that are not ready. `kubectl describe svc` shows only the ready Pods.
 
 Other probe types: `tcpSocket` (port is open) and `exec` (command exits with 0).
 
@@ -726,38 +770,68 @@ show tables;
 
 ## Job
 
-Run Pods until a number of them complete successfully. Used for one-time tasks.
+Run Pods until a number of them complete successfully. Used for one-time tasks, for example a database backup, a data migration, or a report.
+
+This example makes a backup of the MySQL database from the StatefulSet section.
 
 ```bash
-kubectl create job pi --image=perl:5.44 $do -- perl -Mbignum=bpi -wle 'print bpi(100)' > pi-job.yaml
-vim pi-job.yaml
-# set spec.completions: 3, spec.parallelism: 2, spec.backoffLimit: 2
+kubectl create job mysql-backup --image=public.ecr.aws/docker/library/mysql:8.4.13 $do -- sh -c 'mysqldump -h mysql -u root -pP@ssw0rd mydb' > mysql-backup-job.yaml
+vim mysql-backup-job.yaml
+# set spec.backoffLimit: 2 and spec.activeDeadlineSeconds: 120
 
-kubectl apply -f pi-job.yaml
+kubectl apply -f mysql-backup-job.yaml
 kubectl get jobs
-kubectl get pods -l job-name=pi
-kubectl logs job/pi
+kubectl get pods -l job-name=mysql-backup
+kubectl wait job mysql-backup --for=condition=Complete --timeout=120s
+kubectl logs job/mysql-backup | grep 'CREATE TABLE'
+```
+
+- The backup goes to the logs here. A real backup writes to a volume or to object storage.
+- `backoffLimit`: the number of retries after a Pod fails. `activeDeadlineSeconds`: the Job stops after this time.
+- `completions` and `parallelism`: for work in many parts. For example, `completions: 3` and `parallelism: 2` run 3 Pods, 2 at the same time.
+
+Try a wrong password. The Job tries again 2 times, then it shows `Failed`.
+
+```bash
+kubectl delete job mysql-backup
+sed -i 's/-pP@ssw0rd/-pwrong/' mysql-backup-job.yaml
+kubectl apply -f mysql-backup-job.yaml
+kubectl get pods -l job-name=mysql-backup --watch # stop with Ctrl + c after 3 Pods show Error
+kubectl describe job mysql-backup | grep -A 5 Events
+kubectl delete job mysql-backup
 ```
 
 ## CronJob
 
-Create a Job on a schedule. The schedule uses cron format: minute, hour, day of month, month, day of week.
+Create a Job on a schedule, for example a backup every night. The schedule uses cron format: minute, hour, day of month, month, day of week.
 
 ```bash
-kubectl create cronjob hello --image=busybox:1.38 --schedule="*/1 * * * *" -- sh -c 'date; echo hello'
-kubectl get cronjob hello
-kubectl get jobs --watch
+# every day at 02:00
+kubectl create cronjob mysql-backup --image=public.ecr.aws/docker/library/mysql:8.4.13 --schedule="0 2 * * *" -- sh -c 'mysqldump -h mysql -u root -pP@ssw0rd mydb'
+kubectl get cronjob mysql-backup
 
 # run the CronJob now, without waiting for the schedule
-kubectl create job hello-manual --from=cronjob/hello
+kubectl create job mysql-backup-manual --from=cronjob/mysql-backup
+kubectl wait job mysql-backup-manual --for=condition=Complete --timeout=120s
+kubectl logs job/mysql-backup-manual | grep 'CREATE TABLE'
+
+# run every minute to see the schedule work
+kubectl patch cronjob mysql-backup -p '{"spec": {"schedule": "*/1 * * * *"}}'
+kubectl get jobs --watch
 
 kubectl explain cronjob.spec | grep -E 'successfulJobsHistoryLimit|failedJobsHistoryLimit|concurrencyPolicy|suspend'
-kubectl delete cronjob hello
+kubectl delete job mysql-backup-manual
+kubectl delete cronjob mysql-backup
 ```
 
 ## ConfigMap
 
+- Keeps settings out of the container image. You use the same image in dev and in prod, with a different ConfigMap.
+- A program reads a ConfigMap as environment variables or as files.
+
 ### Create ConfigMap
+
+These are the settings of the kubeapp application.
 
 ```bash
 cat <<EOF >kubeapp-configmap.yaml
@@ -847,7 +921,58 @@ printenv | grep -E 'COLOR=|MODE=|SERVICE='
 exit
 ```
 
-### ConfigMap as file specific key
+### ConfigMap as config file
+
+Many programs read a config file, for example nginx, Prometheus and Redis. Put the file in a ConfigMap and mount the ConfigMap as a directory.
+
+```bash
+cat <<'EOF' >default.conf
+server {
+  listen 80;
+  location / {
+    return 200 "maintenance: off\n";
+  }
+}
+EOF
+kubectl create configmap site-config --from-file=default.conf
+kubectl get configmap site-config -o yaml
+
+cat <<EOF >site-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: site
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: site
+  template:
+    metadata:
+      labels:
+        app: site
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.30.6
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/conf.d
+      volumes:
+      - name: config
+        configMap:
+          name: site-config
+EOF
+
+kubectl apply -f site-deployment.yaml
+kubectl rollout status deployment site
+kubectl exec deployment/site -- ls /etc/nginx/conf.d
+kubectl exec deployment/site -- curl -s localhost # maintenance: off
+```
+
+### Mount one key as a file
+
+Use `items` to mount only some keys, or to give a file a different name.
 
 ```bash
 cat <<EOF >kubeapp-deployment.yaml
@@ -883,130 +1008,113 @@ spec:
 EOF
 
 kubectl apply -f kubeapp-deployment.yaml
-kubectl exec -ti deployment/kubeapp -- sh
-ls /data/config
-cat /data/config/mode-file-name
-exit
+kubectl rollout status deployment kubeapp
+kubectl exec deployment/kubeapp -- ls /data/config
+kubectl exec deployment/kubeapp -- cat /data/config/mode-file-name
 ```
 
-### ConfigMap as file
+### Update a ConfigMap
 
 ```bash
-cat <<EOF >kubeapp-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    app: kubeapp
-  name: kubeapp
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kubeapp
-  template:
-    metadata:
-      labels:
-        app: kubeapp
-    spec:
-      containers:
-      - image: public.ecr.aws/docker/library/nginx:1.30.6
-        name: kubeapp
-        volumeMounts:
-          - mountPath: /data/config
-            name: config
-      volumes:
-        - name: config
-          configMap:
-            name: kubeapp
-EOF
+kubectl edit configmap site-config
+# change "maintenance: off" to "maintenance: on"
 
-kubectl apply -f kubeapp-deployment.yaml
-kubectl exec -ti deployment/kubeapp -- sh
-ls /data/config
-cat /data/config/MODE
-exit
+# the kubelet updates the file in the Pod after some seconds, up to about 1 minute
+kubectl exec deployment/site -- cat /etc/nginx/conf.d/default.conf
+
+# nginx read the file when it started, so it still uses the old content
+kubectl exec deployment/site -- curl -s localhost # maintenance: off
+
+# restart the Pods to use the new file
+kubectl rollout restart deployment site
+kubectl rollout status deployment site
+kubectl exec deployment/site -- curl -s localhost # maintenance: on
 ```
+
+- Environment variables from a ConfigMap do not change in a running container. Restart the Pods to use new values.
+- A file mounted with `subPath` does not get updates.
 
 ## Secret
 
+- Like a ConfigMap, but for passwords, tokens and keys.
+- The values are base64 encoded, not encrypted. Each user with permission to get Secrets can read them. Control this with RBAC.
+
 ### Create Secret
 
+The MySQL StatefulSet has the password in plain text in the manifest. Move the password to a Secret.
+
 ```bash
-kubectl create secret generic kubeapp --from-literal=MODE=development --from-literal=COLOR=blue
-kubectl get secret
-kubectl get secret kubeapp -o yaml
+kubectl create secret generic mysql --from-literal=MYSQL_ROOT_PASSWORD='P@ssw0rd' --from-literal=MYSQL_PASSWORD='P@ssw0rd'
+kubectl get secret mysql -o yaml
+
+# base64 is not encryption
+kubectl get secret mysql -o jsonpath='{.data.MYSQL_ROOT_PASSWORD}' | base64 -d; echo
 ```
 
 ### Secret as env variable
 
-```bash
-kubectl apply -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    app: kubeapp
-  name: kubeapp
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kubeapp
-  template:
-    metadata:
-      labels:
-        app: kubeapp
-    spec:
-      containers:
-      - image: public.ecr.aws/docker/library/nginx:1.30.6
-        name: kubeapp
-        envFrom:
-          - secretRef:
-              name: kubeapp
-EOF
+In `mysql-statefulset.yaml`, change `env` to:
 
-kubectl exec -ti deployment/kubeapp -- sh
-printenv | grep -E 'COLOR=|MODE='
-exit
+```yaml
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql
+              key: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_DATABASE
+          value: "mydb"
+        - name: MYSQL_USER
+          value: "user"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql
+              key: MYSQL_PASSWORD
 ```
+
+```bash
+vim mysql-statefulset.yaml
+kubectl apply -f mysql-statefulset.yaml
+kubectl rollout status statefulset mysql
+kubectl get statefulset mysql -o yaml | grep -A 4 MYSQL_ROOT_PASSWORD
+
+# MySQL needs about 30 seconds to start
+kubectl exec -ti mysql-0 -- mysql -h 127.0.0.1 -u root -p mydb -e 'show tables;'
+```
+
+- To get all keys of a Secret as variables, use `envFrom` with `secretRef`, like `configMapRef` above.
+- MySQL reads these variables only at the first start, when the data directory is empty. A new value in the Secret does not change the password of an existing database.
 
 ### Secret as file
 
+Some programs read a password from a file, for example with `MYSQL_ROOT_PASSWORD_FILE` or `POSTGRES_PASSWORD_FILE`. TLS certificates are also mounted as files.
+
 ```bash
 kubectl apply -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: v1
+kind: Pod
 metadata:
-  labels:
-    app: kubeapp
-  name: kubeapp
+  name: db-client
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kubeapp
-  template:
-    metadata:
-      labels:
-        app: kubeapp
-    spec:
-      containers:
-      - image: public.ecr.aws/docker/library/nginx:1.30.6
-        name: kubeapp
-        volumeMounts:
-          - mountPath: /data/config
-            name: config
-      volumes:
-        - name: config
-          secret:
-            secretName: kubeapp
+  containers:
+  - name: client
+    image: busybox:1.38
+    command: ["sleep", "3600"]
+    volumeMounts:
+    - name: credentials
+      mountPath: /etc/mysql-credentials
+      readOnly: true
+  volumes:
+  - name: credentials
+    secret:
+      secretName: mysql
 EOF
 
-kubectl exec -ti deployment/kubeapp -- sh
-ls /data/config
-cat /data/config/MODE
-exit
+kubectl wait pod db-client --for=condition=Ready
+kubectl exec db-client -- ls /etc/mysql-credentials
+kubectl exec db-client -- cat /etc/mysql-credentials/MYSQL_ROOT_PASSWORD
+kubectl delete pod db-client --now
 ```
 
 ### Review
@@ -1336,10 +1444,28 @@ kubectl get pod
 
 ## Static Pod
 
-- Manually run a pod on a specific node, bypassing the scheduler.
+- A Pod that the kubelet runs from a file on the node, without the API server and the scheduler.
 - The kubelet watches the directory in `staticPodPath` of `/var/lib/kubelet/config.yaml`. kubeadm sets it to `/etc/kubernetes/manifests`.
 - The Pod name gets the node name as suffix, for example `pod-static-worker1`.
 - You can't delete a static pod with kubectl. Remove the manifest file instead.
+
+### The control plane runs as static Pods
+
+kube-apiserver cannot start itself through the API server. Thus kubeadm puts the control plane components in files on the controller, and the kubelet starts them.
+
+```bash
+# on the controller
+sudo ls /etc/kubernetes/manifests/ # etcd, kube-apiserver, kube-controller-manager, kube-scheduler
+kubectl get pods -n kube-system -o wide | grep $(hostname)
+
+# kubectl shows a copy (mirror Pod). If you delete it, the kubelet creates it again.
+kubectl delete pod -n kube-system kube-scheduler-$(hostname)
+kubectl get pods -n kube-system | grep kube-scheduler
+```
+
+- If kube-apiserver does not start, look for an error in `/etc/kubernetes/manifests/kube-apiserver.yaml`. See [Debugging node](#debugging-node).
+
+### Create a static Pod on a worker
 
 ```bash
 ssh $WORKER_IP
@@ -1484,35 +1610,92 @@ kubectl get pods -n payment
 
 ## Priority Class
 
+- When the cluster is full, the scheduler removes (preempts) Pods with a lower priority to make space for a Pod with a higher priority.
+- Example: the checkout service of a shop must run, but a batch report can wait.
+- Kubernetes uses this for its own Pods: `system-node-critical` and `system-cluster-critical`.
+
 ```bash
-cat <<EOF >high-priority-priorityclass.yaml
+kubectl get priorityclass
+
+cat <<EOF >priorityclasses.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-priority
+value: 1000
+description: "Batch jobs that can wait."
+---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: high-priority
 value: 1000000
 globalDefault: false
-description: "This priority class should be used for XYZ service pods only."
+description: "Customer-facing services."
 EOF
-kubectl apply -f high-priority-priorityclass.yaml
+kubectl apply -f priorityclasses.yaml
+```
 
-cat <<EOF >nginx-priorityclass.yaml
+### Fill the cluster with low-priority Pods
+
+Each worker has 2 CPUs. 8 Pods with a request of 500m do not fit, so some Pods stay Pending.
+
+```bash
+cat <<EOF >batch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: batch
+  template:
+    metadata:
+      labels:
+        app: batch
+    spec:
+      priorityClassName: low-priority
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: batch
+        image: busybox:1.38
+        command: ["sleep", "infinity"]
+        resources:
+          requests:
+            cpu: 500m
+EOF
+kubectl apply -f batch.yaml
+kubectl get pods -l app=batch -o wide
+```
+
+### Create a high-priority Pod
+
+```bash
+cat <<EOF >checkout.yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: nginx
-  labels:
-    env: test
+  name: checkout
 spec:
+  priorityClassName: high-priority
   containers:
   - name: nginx
     image: nginx:1.30.6
-    imagePullPolicy: IfNotPresent
-  priorityClassName: high-priority
+    resources:
+      requests:
+        cpu: 500m
 EOF
-kubectl apply -f nginx-priorityclass.yaml
+kubectl apply -f checkout.yaml
 
-kubectl get priorityclass
+# one batch Pod is removed and goes back to Pending, then checkout runs
+kubectl get pods -o wide --watch # stop with Ctrl + c when checkout is Running
+kubectl get events --field-selector reason=Preempted
+kubectl get pods -o custom-columns=NAME:.metadata.name,PRIORITY:.spec.priority,STATUS:.status.phase
+
+kubectl delete pod checkout
+kubectl delete deployment batch
 ```
 
 # Autoscaling
@@ -1680,24 +1863,27 @@ exit
 
 ### ExternalName
 
+- A name in the cluster for a service outside the cluster. The app uses the short name `weather`. If the provider changes, you change only the Service, not the app.
+- It is only a DNS alias (CNAME). It does not forward traffic and has no Pods. Many websites reject the request, because the Host header is still `weather`. For HTTPS, the certificate does not match the name either.
+
 ```bash
-cat <<EOF >gogolele-service.yaml
+cat <<EOF >weather-service.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: gogolele
+  name: weather
 spec:
   type: ExternalName
-  externalName: google.com
+  externalName: wttr.in
 EOF
 
-kubectl apply -f gogolele-service.yaml
-kubectl get svc
-kubectl describe svc gogolele
+kubectl apply -f weather-service.yaml
+kubectl get svc weather
+kubectl describe svc weather
 
 kubectl run test -it --rm --image=kubenesia/kubebox -- sh
-curl gogolele
-nslookup gogolele
+nslookup weather # weather -> wttr.in
+curl -s "weather/Jakarta?format=3"
 exit
 ```
 
@@ -2164,6 +2350,9 @@ curl --connect-to ::$WORKER_IP:30080 example.com/green
 
 ### Weight
 
+- Used for a canary release: send a small part of the traffic to the new version. If the new version works, increase its weight step by step.
+- This example sends 50% to each version.
+
 ```bash
 kubectl apply -f - <<EOF
 kind: HTTPRoute
@@ -2332,59 +2521,45 @@ curl -m 5 backend.marketplace # fail
 
 ## Share directory between containers inside a pod using emptyDir
 
+- An emptyDir volume is an empty directory that all containers of the Pod can use. It is deleted with the Pod.
+- Example: one container makes a status page every 5 seconds, and nginx serves it. Each container does one job.
+
 ```bash
-cat <<EOF >pod-with-empty-dir.yaml
+cat <<EOF >status-page.yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: pod-with-empty-dir
+  name: status-page
 spec:
   containers:
+  - name: generator
+    image: busybox:1.38
+    command: ["sh", "-c", "while true; do echo \"<h1>Status: OK</h1><p>Updated: \$(date)</p>\" > /html/index.html; sleep 5; done"]
+    volumeMounts:
+    - name: html
+      mountPath: /html
   - name: nginx
     image: nginx:1.30.6
     volumeMounts:
-    - name: wwwroot
+    - name: html
       mountPath: /usr/share/nginx/html
-  - name: caddy
-    image: caddy:2.11.7
-    command:
-      - caddy
-      - file-server
-      - --root
-      - /var/www/html
-      - --listen
-      - :8080
-    volumeMounts:
-    - name: wwwroot
-      mountPath: /var/www/html
   volumes:
-  - name: wwwroot
+  - name: html
     emptyDir:
-      sizeLimit: 500Mi
+      sizeLimit: 100Mi
 EOF
 
-kubectl apply -f pod-with-empty-dir.yaml
+kubectl apply -f status-page.yaml
+kubectl wait pod status-page --for=condition=Ready
+kubectl get pod status-page # READY 2/2
 
-# port-forward blocks the terminal. Run curl in a second terminal, then stop port-forward with Ctrl + c.
-kubectl exec -ti -c nginx pod-with-empty-dir -- bash
-echo "Test emptyDir volume with containers" >/usr/share/nginx/html/index.html
-exit
+# the time changes every 5 seconds
+kubectl exec status-page -c nginx -- curl -s localhost
+sleep 5
+kubectl exec status-page -c nginx -- curl -s localhost
 
-kubectl port-forward pod-with-empty-dir 1234:80
-curl -v localhost:1234
-
-kubectl port-forward pod-with-empty-dir 1234:8080
-curl -v localhost:1234
-
-kubectl exec -ti -c caddy pod-with-empty-dir -- sh
-echo "New page" >/var/www/html/index.html
-exit
-
-kubectl port-forward pod-with-empty-dir 1234:80
-curl -v localhost:1234
-
-kubectl port-forward pod-with-empty-dir 1234:8080
-curl -v localhost:1234
+# the files are gone when the Pod is deleted
+kubectl delete pod status-page
 ```
 
 ## Init container and sidecar container
@@ -2889,31 +3064,84 @@ kubectl delete role andy
 
 ## ServiceAccount
 
-- Identity for processes that run in a Pod.
-- Bind a Role or ClusterRole to a ServiceAccount with `--serviceaccount=$NAMESPACE:$NAME`.
+- A user (like `andy`) is a person who runs `kubectl`. A ServiceAccount is the identity of a program that runs in a Pod and calls the Kubernetes API.
+- Examples: the ingress controller reads Ingresses, Argo CD creates Deployments, Prometheus lists Pods, and a CI pipeline deploys new versions.
+- Each Pod runs as a ServiceAccount. If you do not set one, the Pod uses `default`, which has no permissions.
+- Kubernetes puts a token of the ServiceAccount in the Pod at `/var/run/secrets/kubernetes.io/serviceaccount/`. The program sends this token to the API server.
+
+### See ServiceAccounts in your cluster
+
+The components that you installed already use ServiceAccounts:
+
+```bash
+kubectl get pods -A -o custom-columns=NAMESPACE:.metadata.namespace,POD:.metadata.name,SERVICEACCOUNT:.spec.serviceAccountName
+kubectl get clusterrolebinding -o wide | grep -E 'ingress-nginx|calico|metrics-server'
+```
+
+### A Pod that reads the Pod list
+
+This Pod is a small monitoring tool. It asks the API server for the list of Pods.
 
 ```bash
 kubectl create serviceaccount pod-reader
+kubectl run pod-watcher --image=kubenesia/kubebox --overrides='{"spec": {"serviceAccountName": "pod-reader"}}' --command -- sleep 3600
+kubectl wait pod pod-watcher --for=condition=Ready
+
+kubectl exec -ti pod-watcher -- sh
+SA=/var/run/secrets/kubernetes.io/serviceaccount
+ls $SA # ca.crt namespace token
+TOKEN=$(cat $SA/token)
+
+# call the API like a program does
+curl -s --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" https://kubernetes.default.svc/api/v1/namespaces/default/pods | grep message
+exit
+```
+
+- The answer is `Forbidden`. The ServiceAccount exists, but no Role gives it permissions.
+
+### Give permissions to the ServiceAccount
+
+Bind a Role or ClusterRole to a ServiceAccount with `--serviceaccount=$NAMESPACE:$NAME`.
+
+```bash
 kubectl create role pod-reader --verb=get,list,watch --resource=pods
 kubectl create rolebinding pod-reader --role=pod-reader --serviceaccount=default:pod-reader
 
-# check permission without switching context
+kubectl exec -ti pod-watcher -- sh
+SA=/var/run/secrets/kubernetes.io/serviceaccount
+TOKEN=$(cat $SA/token)
+curl -s --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" -o /dev/null -w '%{http_code}\n' https://kubernetes.default.svc/api/v1/namespaces/default/pods # 200
+curl -s --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" -o /dev/null -w '%{http_code}\n' https://kubernetes.default.svc/api/v1/namespaces/default/secrets # 403
+exit
+```
+
+### Check permissions without a Pod
+
+These commands are faster in the exam.
+
+```bash
 kubectl auth can-i list pods --as=system:serviceaccount:default:pod-reader # yes
 kubectl auth can-i list secrets --as=system:serviceaccount:default:pod-reader # no
 
-# use a token of the ServiceAccount
-export TOKEN=$(kubectl create token pod-reader)
-kubectl get pods --token=$TOKEN # ok
-kubectl get secrets --token=$TOKEN # fail
+# a short-lived token, for example for a CI pipeline outside the cluster
+export TOKEN=$(kubectl create token pod-reader --duration=10m)
+kubectl config set-credentials pod-reader --token=$TOKEN
+kubectl config set-context pod-reader --cluster=kubernetes --user=pod-reader
+kubectl --context=pod-reader get pods # ok
+kubectl --context=pod-reader get secrets # fail
+```
 
-# use the ServiceAccount in a Pod
-kubectl run nginx --image=nginx:1.30.6 --overrides='{"spec": {"serviceAccountName": "pod-reader"}}'
-kubectl get pod nginx -o jsonpath='{.spec.serviceAccountName}'
+- Do not use `kubectl get pods --token=$TOKEN` with the admin kubeconfig. kubectl then also sends the admin certificate, and the API server uses the certificate.
 
-kubectl delete pod nginx
+### Clean up
+
+```bash
+kubectl delete pod pod-watcher --now
 kubectl delete rolebinding pod-reader
 kubectl delete role pod-reader
 kubectl delete serviceaccount pod-reader
+kubectl config delete-context pod-reader
+kubectl config delete-user pod-reader
 ```
 
 ### Review
@@ -3058,12 +3286,23 @@ Common causes:
 
 ## etcd backup
 
-```bash
-# backup existing etcd manifests
-sudo cp /etc/kubernetes/manifests/etcd.yaml etcd.yaml
+- etcd stores all objects of the cluster. A snapshot of etcd is a backup of the whole cluster state.
+- Use `etcdctl` and `etcdutl` with the same version as the etcd server. The Ubuntu package `etcd-client` is too old (3.4). A restore made with etcdctl 3.4 makes etcd 3.6 stop with `failed to update; member unknown`.
+- `etcdctl snapshot save` connects to the running etcd. `etcdutl` works on files only: `snapshot status` and `snapshot restore`.
+- In the exam, the tools are usually installed. Check with `etcdctl version` and `etcdutl version`.
 
-# install client tools
-sudo apt-get install etcd-client
+```bash
+# find the version of the etcd server, for example 3.6.8
+sudo grep image: /etc/kubernetes/manifests/etcd.yaml
+export ETCD_VER=v3.6.8
+
+# install etcdctl and etcdutl with the same version
+curl -fsSL https://github.com/etcd-io/etcd/releases/download/$ETCD_VER/etcd-$ETCD_VER-linux-amd64.tar.gz | sudo tar xz -C /usr/local/bin --strip-components=1 etcd-$ETCD_VER-linux-amd64/etcdctl etcd-$ETCD_VER-linux-amd64/etcdutl
+etcdctl version
+etcdutl version
+
+# keep a copy of the etcd manifest, outside /etc/kubernetes/manifests
+sudo cp /etc/kubernetes/manifests/etcd.yaml ~/etcd.yaml.orig
 
 # find the certificate paths and the endpoint
 sudo grep -E 'cert-file|key-file|trusted-ca-file|listen-client-urls' /etc/kubernetes/manifests/etcd.yaml
@@ -3072,39 +3311,78 @@ sudo grep -E 'cert-file|key-file|trusted-ca-file|listen-client-urls' /etc/kubern
 kubectl create ns before-backup
 
 # do backup
-sudo ETCDCTL_API=3 etcdctl \
+sudo etcdctl \
     --endpoints=https://127.0.0.1:2379 \
     --cacert=/etc/kubernetes/pki/etcd/ca.crt \
     --cert=/etc/kubernetes/pki/etcd/server.crt \
     --key=/etc/kubernetes/pki/etcd/server.key \
-    snapshot save snapshot.db
-
-kubectl delete ns before-backup
+    snapshot save /root/snapshot.db
 
 # view backup result
-# in etcd 3.5 and later, `etcdctl snapshot status` is deprecated. Use `etcdutl` if it is installed.
-sudo ETCDCTL_API=3 etcdctl --write-out=table snapshot status snapshot.db
-sudo etcdutl --write-out=table snapshot status snapshot.db
+sudo etcdutl --write-out=table snapshot status /root/snapshot.db
+
+# change the cluster after the backup. The restore must bring the ns back.
+kubectl delete ns before-backup
 ```
 
 ## etcd restore
 
+- The restore writes the snapshot to a new data directory. Then etcd must use this directory.
+- Give the restore the same member name and peer URL as in `etcd.yaml`. If you do not, the member gets the name `default` and the peer URL `http://localhost:2380`.
+
 ```bash
-# in etcd 3.5 and later, `etcdctl snapshot restore` is deprecated. Use `etcdutl` if it is installed.
-sudo ETCDCTL_API=3 etcdctl \
+# read the member name and peer URL from the manifest
+export ETCD_NAME=$(sudo grep -oP '(?<=--name=).*' /etc/kubernetes/manifests/etcd.yaml)
+export ETCD_PEER_URL=$(sudo grep -oP '(?<=--initial-advertise-peer-urls=).*' /etc/kubernetes/manifests/etcd.yaml)
+echo $ETCD_NAME $ETCD_PEER_URL
+
+# the directory must not exist
+sudo etcdutl snapshot restore /root/snapshot.db \
     --data-dir /var/lib/etcd-from-backup \
-    snapshot restore snapshot.db
-sudo etcdutl --data-dir /var/lib/etcd-from-backup snapshot restore snapshot.db
+    --name $ETCD_NAME \
+    --initial-cluster $ETCD_NAME=$ETCD_PEER_URL \
+    --initial-advertise-peer-urls $ETCD_PEER_URL
+sudo ls /var/lib/etcd-from-backup/member
+```
 
+Change only the `hostPath` of the `etcd-data` volume. Do not change `--data-dir` or `mountPath`: in the container, the path stays `/var/lib/etcd`.
+
+```yaml
+  volumes:
+  - hostPath:
+      path: /var/lib/etcd-from-backup # was /var/lib/etcd
+      type: DirectoryOrCreate
+    name: etcd-data
+```
+
+```bash
 sudo vim /etc/kubernetes/manifests/etcd.yaml
-# replace /var/lib/etcd to /var/lib/etcd-from-backup on hostPath
 
-# wait until the kubelet restarts etcd and kube-apiserver
-sudo crictl ps | grep -E 'etcd|kube-apiserver'
+# check: one hostPath line changed, mountPath and --data-dir are still /var/lib/etcd
+sudo grep -nE 'data-dir|mountPath: /var/lib|path: /var/lib' /etc/kubernetes/manifests/etcd.yaml
+```
+
+The kubelet starts etcd again with the new directory. kube-apiserver fails while etcd is down, so kubectl times out or is refused for 1 to 2 minutes.
+
+```bash
+# wait until the API server is ready
+until kubectl get --raw=/readyz >/dev/null 2>&1; do sleep 5; done
+kubectl get pods -n kube-system
 
 # ns should be restored
 kubectl get ns before-backup
 ```
+
+- `crictl` is possibly not installed. Without kubectl, check the logs in `/var/log/pods/kube-system_etcd-*/etcd/` and `/var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/`.
+- kube-apiserver can wait up to 5 minutes in CrashLoopBackOff after etcd is fixed. To start it now, move its manifest out of the directory and back:
+
+```bash
+sudo mv /etc/kubernetes/manifests/kube-apiserver.yaml /root/
+sleep 20
+sudo mv /root/kube-apiserver.yaml /etc/kubernetes/manifests/
+```
+
+- To undo the restore, copy `~/etcd.yaml.orig` back to `/etc/kubernetes/manifests/etcd.yaml`.
 
 ## Version upgrade
 
